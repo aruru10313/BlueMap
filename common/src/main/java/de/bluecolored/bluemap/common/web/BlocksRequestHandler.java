@@ -25,24 +25,36 @@
 package de.bluecolored.bluemap.common.web;
 
 import de.bluecolored.bluemap.common.live.BlockTracker;
+import de.bluecolored.bluemap.common.serverinterface.Server;
+import de.bluecolored.bluemap.common.serverinterface.ServerWorld;
 import de.bluecolored.bluemap.common.web.http.HttpRequest;
 import de.bluecolored.bluemap.common.web.http.HttpRequestHandler;
 import de.bluecolored.bluemap.common.web.http.HttpResponse;
 import de.bluecolored.bluemap.common.web.http.HttpStatusCode;
+import de.bluecolored.bluemap.core.util.Key;
 import de.bluecolored.bluemap.core.world.World;
+import org.jetbrains.annotations.Nullable;
 
 public class BlocksRequestHandler implements HttpRequestHandler {
 
     private final BlockTracker blockTracker;
+    private final Server server;
     private final World world;
+    private transient @Nullable ServerWorld serverWorld;
 
-    public BlocksRequestHandler(BlockTracker blockTracker, World world) {
+    public BlocksRequestHandler(BlockTracker blockTracker, Server server, World world) {
         this.blockTracker = blockTracker;
+        this.server = server;
         this.world = world;
     }
 
     @Override
     public HttpResponse handle(HttpRequest request) {
+        if (serverWorld == null) {
+            serverWorld = server.getServerWorld(world).orElse(null);
+        }
+        Key dimension = serverWorld != null ? serverWorld.getDimension() : null;
+
         long since = 0;
         String sinceStr = request.getGETParams().get("since");
         if (sinceStr != null && !sinceStr.isEmpty()) {
@@ -51,7 +63,7 @@ public class BlocksRequestHandler implements HttpRequestHandler {
             } catch (NumberFormatException ignored) {}
         }
 
-        String json = blockTracker.toJson(world.getDimension(), since);
+        String json = blockTracker.toJson(dimension, since);
 
         HttpResponse response = new HttpResponse(HttpStatusCode.OK);
         response.addHeader("Cache-Control", "no-cache");

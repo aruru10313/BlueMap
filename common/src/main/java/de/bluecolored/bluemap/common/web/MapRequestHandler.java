@@ -51,7 +51,7 @@ public class MapRequestHandler extends RoutingRequestHandler {
         this(map.getStorage(),
                 new LivePlayersDataSupplier(serverInterface, pluginConfig, map.getWorld(), playerFilter),
                 new LiveMarkersDataSupplier(map.getMarkerSets()),
-                blockTracker != null ? new BlocksRequestHandler(blockTracker, map.getWorld()) : null);
+                blockTracker != null ? new BlocksRequestHandler(blockTracker, serverInterface, map.getWorld()) : null);
     }
 
     public MapRequestHandler(MapStorage mapStorage) {

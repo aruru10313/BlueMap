@@ -68,7 +68,7 @@ public class BlockTracker {
         long now = System.currentTimeMillis();
         long currentSeq = seqGenerator.get();
 
-        WorldBlockHistory history = worldHistories.get(dimension);
+        WorldBlockHistory history = dimension != null ? worldHistories.get(dimension) : null;
         List<BlockRecord> records = history != null ? history.getSince(sinceSeq) : Collections.emptyList();
 
         StringBuilder sb = new StringBuilder(64 + records.size() * 64);
