@@ -1,33 +1,98 @@
 <template>
   <div v-if="blockManager && blockState" class="timelapse-container" :class="{'open': blockState.timelapseOpen}">
+    
+    <!-- Floating Toast Notification for Date / System Feedback -->
+    <transition name="toast-anim">
+      <div v-if="blockState.toastMessage" class="timelapse-toast">
+        <span class="toast-icon">ℹ️</span>
+        <span class="toast-text">{{ blockState.toastMessage }}</span>
+      </div>
+    </transition>
+
     <!-- Floating Collapsed Pill (when closed) -->
     <div v-if="!blockState.timelapseOpen" class="collapsed-container">
       <button class="timelapse-toggle-btn" @click="toggleOpen" title="타임랩스 / 실시간 타임라인 열기">
         <span class="icon">⏱</span>
         <span class="label">타임랩스</span>
-        <span v-if="blockState.renderedBlocks > 0" class="badge">
-          {{ blockState.renderedBlocks }}
-        </span>
-        <span class="live-dot-mini" :class="{'pulsing': blockState.isPlaying || blockState.progress >= 0.99}"></span>
+        <span class="live-dot-mini" :class="{'pulsing': blockState.isPlaying || (isViewingToday && blockState.progress >= 0.999)}"></span>
       </button>
 
-      <button class="quick-sync-btn" :class="{'syncing': blockState.isSyncing}" @click.stop="syncMap" title="맵 및 블록 즉시 동기화 (새로고침 없이 갱신)">
+      <button class="quick-sync-btn" :class="{'syncing': blockState.isSyncing}" @click.stop="syncMap" title="맵 및 블록 즉시 동기화">
         <span class="sync-icon" :class="{'spinning': blockState.isSyncing}">🔄</span>
       </button>
     </div>
 
     <!-- Main Expanded Control Panel -->
-    <!-- Main Expanded Control Panel -->
     <div v-else class="timelapse-panel">
-      <!-- Row 1: Header + User Filter Chip + Status & Sync -->
+      <!-- Row 1: Header + Calendar Chip + User Filter Chip + Actions -->
       <div class="panel-header">
         <div class="header-left">
-          <span class="icon">⏱</span>
-          <span class="title">타임랩스</span>
-          <span class="badge">{{ blockState.renderedBlocks }} / {{ blockState.totalEvents }}</span>
-          <span v-if="blockState.syncStatusText" class="sync-status-badge">{{ blockState.syncStatusText }}</span>
+          <div class="title-group">
+            <span class="icon">⏱</span>
+            <span class="title">타임랩스</span>
+          </div>
 
-          <!-- Inline compact user selector chip with custom flicker-free dropdown -->
+          <!-- Calendar Selector Chip -->
+          <div class="calendar-chip" :class="{'open': calendarOpen}" @click.stop="toggleCalendar" title="날짜별 타임랩스 캘린더">
+            <span class="chip-icon">📅</span>
+            <span class="chip-label">{{ formattedSelectedDate }}</span>
+            <span class="chip-arrow" :class="{'rotated': calendarOpen}">▾</span>
+
+            <!-- Custom Glassmorphism Calendar Dropdown -->
+            <div v-if="calendarOpen" class="calendar-dropdown-menu" @click.stop>
+              <!-- Calendar Header -->
+              <div class="cal-header">
+                <button class="cal-nav-btn" @click="prevMonth" title="이전 달">‹</button>
+                <span class="cal-title">{{ calendarTitle }}</span>
+                <button class="cal-nav-btn" @click="nextMonth" title="다음 달">›</button>
+              </div>
+
+              <!-- Weekday Headers -->
+              <div class="cal-weekdays">
+                <span class="cal-wd sun">일</span>
+                <span class="cal-wd">월</span>
+                <span class="cal-wd">화</span>
+                <span class="cal-wd">수</span>
+                <span class="cal-wd">목</span>
+                <span class="cal-wd">금</span>
+                <span class="cal-wd sat">토</span>
+              </div>
+
+              <!-- Days Grid -->
+              <div class="cal-days-grid">
+                <div
+                    v-for="d in calendarDays"
+                    :key="d.key"
+                    class="cal-day-cell"
+                    :class="{
+                      'blank': !d.day,
+                      'selected': d.isSelected,
+                      'today': d.isToday,
+                      'has-data': d.hasData
+                    }"
+                    @click="d.day ? selectCalendarDate(d.day) : null"
+                >
+                  <span v-if="d.day" class="day-num">{{ d.day }}</span>
+                  <span v-if="d.hasData" class="data-dot" title="건축 기록 있음"></span>
+                </div>
+              </div>
+
+              <!-- Quick Action Shortcuts -->
+              <div class="cal-quick-actions">
+                <button class="cal-quick-btn" @click="quickSelectToday">☀️ 오늘</button>
+                <button class="cal-quick-btn" @click="quickSelectYesterday">🌙 어제</button>
+                <button
+                    v-if="blockState.availableDates && blockState.availableDates.length > 0"
+                    class="cal-quick-btn record-btn"
+                    @click="quickSelectLatestRecord"
+                >
+                  ⚡ 최신 기록일
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- User selector chip -->
           <div class="user-chip" :class="{'active': blockState.selectedPlayer, 'open': userDropdownOpen}" @click.stop="toggleUserDropdown" title="유저별 타임랩스 필터">
             <span class="chip-icon">👤</span>
             <span class="chip-label">{{ blockState.selectedPlayer || '전체 유저' }}</span>
@@ -56,52 +121,6 @@
               </div>
             </div>
           </div>
-
-          <!-- Inline compact date selector chip -->
-          <div class="date-chip" :class="{'active': blockState.dateFilterMode !== 'all', 'open': dateDropdownOpen}" @click.stop="toggleDateDropdown" title="날짜별 타임랩스 필터">
-            <span class="chip-icon">📅</span>
-            <span class="chip-label">{{ dateLabel }}</span>
-            <span class="chip-arrow" :class="{'rotated': dateDropdownOpen}">▾</span>
-
-            <!-- Custom Date Dropdown Menu -->
-            <div v-if="dateDropdownOpen" class="date-dropdown-menu" @click.stop>
-              <div
-                  class="dropdown-item"
-                  :class="{'selected': blockState.dateFilterMode === 'all'}"
-                  @click="selectDateFilter('all')"
-              >
-                <span class="item-name">🌐 전체 기록</span>
-                <span v-if="blockState.dateFilterMode === 'all'" class="check">✓</span>
-              </div>
-              <div
-                  class="dropdown-item"
-                  :class="{'selected': blockState.dateFilterMode === 'today'}"
-                  @click="selectDateFilter('today')"
-              >
-                <span class="item-name">☀️ 오늘</span>
-                <span v-if="blockState.dateFilterMode === 'today'" class="check">✓</span>
-              </div>
-              <div
-                  class="dropdown-item"
-                  :class="{'selected': blockState.dateFilterMode === 'yesterday'}"
-                  @click="selectDateFilter('yesterday')"
-              >
-                <span class="item-name">🌙 어제</span>
-                <span v-if="blockState.dateFilterMode === 'yesterday'" class="check">✓</span>
-              </div>
-              <div v-if="blockState.availableDates && blockState.availableDates.length > 0" class="dropdown-divider"></div>
-              <div
-                  v-for="d in (blockState.availableDates || [])"
-                  :key="d"
-                  class="dropdown-item"
-                  :class="{'selected': blockState.dateFilterMode === 'date' && blockState.selectedDate === d}"
-                  @click="selectDateFilter('date', d)"
-              >
-                <span class="item-name">📅 {{ formatDateLabel(d) }}</span>
-                <span v-if="blockState.dateFilterMode === 'date' && blockState.selectedDate === d" class="check">✓</span>
-              </div>
-            </div>
-          </div>
         </div>
 
         <div class="header-right">
@@ -109,9 +128,9 @@
             <span class="sync-icon" :class="{'spinning': blockState.isSyncing}">🔄</span>
           </button>
 
-          <button class="live-pill-btn" :class="{'active': blockState.progress >= 0.99 && !blockState.isPlaying}" @click="jumpEnd" title="실시간 시점으로 이동">
-            <span class="live-dot" :class="{'pulsing': blockState.isPlaying || blockState.progress >= 0.99}"></span>
-            <span class="live-text">{{ blockState.isPlaying ? '재생 중' : (blockState.progress >= 0.99 ? '실시간' : '일시정지') }}</span>
+          <button class="live-pill-btn" :class="{'active': isViewingToday && blockState.progress >= 0.999 && !blockState.isPlaying}" @click="jumpLive" title="실시간 시점으로 이동">
+            <span class="live-dot" :class="{'pulsing': isViewingToday && (blockState.isPlaying || blockState.progress >= 0.999)}"></span>
+            <span class="live-text">{{ blockState.isPlaying ? '재생 중' : (isViewingToday && blockState.progress >= 0.999 ? '실시간' : '일시정지') }}</span>
           </button>
 
           <button class="close-btn" @click="toggleOpen" title="최소화">✕</button>
@@ -126,7 +145,7 @@
               type="range"
               min="0"
               max="1"
-              step="0.001"
+              step="0.0005"
               :value="blockState.progress"
               @input="onSeek"
               class="timeline-slider"
@@ -142,25 +161,17 @@
       <!-- Row 3: Playback Controls & Speed Segmented Control -->
       <div class="controls-row">
         <div class="main-action-group">
-          <button class="ctrl-btn jump-btn" @click="jumpStart" title="처음으로">⏮</button>
+          <button class="ctrl-btn jump-btn" @click="jumpStart" title="해당 일자의 처음(00:00)으로 가기">⏮ 처음으로</button>
           <button class="ctrl-btn play-btn" :class="{'playing': blockState.isPlaying}" @click="togglePlay" :title="blockState.isPlaying ? '일시정지' : '재생'">
             <span class="play-icon">{{ blockState.isPlaying ? '⏸' : '▶' }}</span>
-            <span class="play-label">{{ blockState.isPlaying ? '정지' : '재생' }}</span>
-          </button>
-          <button
-              class="ctrl-btn follow-btn"
-              :class="{'active': blockState.autoFollow}"
-              @click="toggleFollow"
-              title="설치 위치 자동 시점 추적"
-          >
-            🎯 추적
+            <span class="play-label">{{ blockState.isPlaying ? '일시정지' : '재생' }}</span>
           </button>
         </div>
 
         <!-- Speed Segmented Control -->
         <div class="speed-group" title="재생 배속">
           <button
-              v-for="s in [1, 2, 5, 10, 25]"
+              v-for="s in [1, 2, 5, 10, 25, 50]"
               :key="s"
               class="speed-btn"
               :class="{'active': blockState.speed === s}"
@@ -178,9 +189,12 @@
 export default {
   name: "TimelapseBar",
   data() {
+    let now = new Date();
     return {
       userDropdownOpen: false,
-      dateDropdownOpen: false
+      calendarOpen: false,
+      viewYear: now.getFullYear(),
+      viewMonth: now.getMonth() // 0-indexed
     };
   },
   mounted() {
@@ -199,24 +213,62 @@ export default {
     blockState() {
       return this.appState && this.appState.blockState ? this.appState.blockState : (this.blockManager ? this.blockManager.data : null);
     },
-    dateLabel() {
-      if (!this.blockState) return "전체 기록";
-      if (this.blockState.dateFilterMode === "today") return "오늘";
-      if (this.blockState.dateFilterMode === "yesterday") return "어제";
-      if (this.blockState.dateFilterMode === "date" && this.blockState.selectedDate) {
-        return this.formatDateLabel(this.blockState.selectedDate);
+    isViewingToday() {
+      return this.blockManager ? this.blockManager.isViewingToday() : true;
+    },
+    calendarTitle() {
+      return `${this.viewYear}년 ${this.viewMonth + 1}월`;
+    },
+    calendarDays() {
+      let firstDayIndex = new Date(this.viewYear, this.viewMonth, 1).getDay();
+      let totalDays = new Date(this.viewYear, this.viewMonth + 1, 0).getDate();
+
+      let blanks = [];
+      for (let i = 0; i < firstDayIndex; i++) {
+        blanks.push({ day: null, key: `b-${i}` });
       }
-      return "전체 기록";
+
+      let todayStr = this.blockManager ? this.blockManager.formatDateKey(new Date()) : "";
+      let days = [];
+      for (let d = 1; d <= totalDays; d++) {
+        let m = String(this.viewMonth + 1).padStart(2, "0");
+        let dayStr = String(d).padStart(2, "0");
+        let fullDateStr = `${this.viewYear}-${m}-${dayStr}`;
+        let hasData = this.blockState?.availableDates?.includes(fullDateStr);
+        let isSelected = this.blockState?.selectedDate === fullDateStr;
+        let isToday = todayStr === fullDateStr;
+
+        days.push({
+          day: d,
+          dateStr: fullDateStr,
+          hasData,
+          isSelected,
+          isToday,
+          key: fullDateStr
+        });
+      }
+
+      return [...blanks, ...days];
+    },
+    formattedSelectedDate() {
+      if (!this.blockState || !this.blockState.selectedDate) return "날짜 선택";
+      let dateStr = this.blockState.selectedDate;
+      let todayStr = this.blockManager ? this.blockManager.formatDateKey(new Date()) : "";
+      let yestStr = this.blockManager ? this.blockManager.formatDateKey(new Date(Date.now() - 86400000)) : "";
+
+      let parts = dateStr.split("-").map(Number);
+      let suffix = "";
+      if (dateStr === todayStr) suffix = " (오늘)";
+      else if (dateStr === yestStr) suffix = " (어제)";
+
+      return `${parts[0]}. ${String(parts[1]).padStart(2, '0')}. ${String(parts[2]).padStart(2, '0')}${suffix}`;
     },
     startTimeLabel() {
-      return "00:00";
+      return "00:00:00";
     },
     currentTimeLabel() {
-      if (!this.blockState) return "00:00";
-      if (this.blockState.dateFilterMode === "today" || this.blockState.dateFilterMode === "yesterday" || this.blockState.dateFilterMode === "date") {
-        return this.formatClock(this.blockState.currentTime);
-      }
-      return this.formatTime(this.blockState.currentTime - this.blockState.serverStartTime);
+      if (!this.blockState) return "00:00:00";
+      return this.formatClock(this.blockState.currentTime);
     }
   },
   methods: {
@@ -224,12 +276,81 @@ export default {
       if (this.userDropdownOpen && !this.$el?.querySelector(".user-chip")?.contains(e.target)) {
         this.userDropdownOpen = false;
       }
-      if (this.dateDropdownOpen && !this.$el?.querySelector(".date-chip")?.contains(e.target)) {
-        this.dateDropdownOpen = false;
+      if (this.calendarOpen && !this.$el?.querySelector(".calendar-chip")?.contains(e.target)) {
+        this.calendarOpen = false;
       }
     },
     toggleUserDropdown() {
       this.userDropdownOpen = !this.userDropdownOpen;
+      if (this.userDropdownOpen) this.calendarOpen = false;
+    },
+    toggleCalendar() {
+      this.calendarOpen = !this.calendarOpen;
+      if (this.calendarOpen) {
+        this.userDropdownOpen = false;
+        if (this.blockState && this.blockState.selectedDate) {
+          let parts = this.blockState.selectedDate.split("-").map(Number);
+          this.viewYear = parts[0];
+          this.viewMonth = parts[1] - 1;
+        }
+      }
+    },
+    prevMonth() {
+      if (this.viewMonth === 0) {
+        this.viewMonth = 11;
+        this.viewYear--;
+      } else {
+        this.viewMonth--;
+      }
+    },
+    nextMonth() {
+      if (this.viewMonth === 11) {
+        this.viewMonth = 0;
+        this.viewYear++;
+      } else {
+        this.viewMonth++;
+      }
+    },
+    selectCalendarDate(day) {
+      let m = String(this.viewMonth + 1).padStart(2, "0");
+      let d = String(day).padStart(2, "0");
+      let dateStr = `${this.viewYear}-${m}-${d}`;
+      if (this.blockManager) {
+        this.blockManager.selectDate(dateStr);
+      }
+      this.calendarOpen = false;
+    },
+    quickSelectToday() {
+      if (this.blockManager) {
+        let todayStr = this.blockManager.formatDateKey(new Date());
+        this.blockManager.selectDate(todayStr);
+        let now = new Date();
+        this.viewYear = now.getFullYear();
+        this.viewMonth = now.getMonth();
+      }
+      this.calendarOpen = false;
+    },
+    quickSelectYesterday() {
+      if (this.blockManager) {
+        let yest = new Date(Date.now() - 86400000);
+        let yestStr = this.blockManager.formatDateKey(yest);
+        this.blockManager.selectDate(yestStr);
+        this.viewYear = yest.getFullYear();
+        this.viewMonth = yest.getMonth();
+      }
+      this.calendarOpen = false;
+    },
+    quickSelectLatestRecord() {
+      if (this.blockState && this.blockState.availableDates && this.blockState.availableDates.length > 0) {
+        let latest = this.blockState.availableDates[0];
+        if (this.blockManager) {
+          this.blockManager.selectDate(latest);
+          let parts = latest.split("-").map(Number);
+          this.viewYear = parts[0];
+          this.viewMonth = parts[1] - 1;
+        }
+      }
+      this.calendarOpen = false;
     },
     selectPlayer(player) {
       if (this.blockManager) {
@@ -237,30 +358,10 @@ export default {
       }
       this.userDropdownOpen = false;
     },
-    toggleDateDropdown() {
-      this.dateDropdownOpen = !this.dateDropdownOpen;
-    },
-    selectDateFilter(mode, dateStr = "") {
+    clearPlayerFilter() {
       if (this.blockManager) {
-        this.blockManager.setDateFilter(mode, dateStr);
+        this.blockManager.setPlayerFilter("");
       }
-      this.dateDropdownOpen = false;
-    },
-    formatDateLabel(dateStr) {
-      if (!dateStr) return "";
-      let parts = dateStr.split("-");
-      if (parts.length === 3) {
-        return `${Number(parts[1])}월 ${Number(parts[2])}일`;
-      }
-      return dateStr;
-    },
-    formatClock(ts) {
-      if (!ts) return "00:00:00";
-      let d = new Date(ts);
-      let h = String(d.getHours()).padStart(2, "0");
-      let m = String(d.getMinutes()).padStart(2, "0");
-      let s = String(d.getSeconds()).padStart(2, "0");
-      return `${h}:${m}:${s}`;
     },
     toggleOpen() {
       if (this.blockManager) {
@@ -279,6 +380,7 @@ export default {
     },
     onSeek(e) {
       if (this.blockManager) {
+        this.blockManager.pause();
         this.blockManager.seek(parseFloat(e.target.value));
       }
     },
@@ -293,38 +395,23 @@ export default {
         this.blockManager.seek(0.0);
       }
     },
-    jumpEnd() {
+    jumpLive() {
       if (this.blockManager) {
-        this.blockManager.pause();
-        this.blockManager.seek(1.0);
+        if (!this.blockManager.isViewingToday()) {
+          this.quickSelectToday();
+        } else {
+          this.blockManager.pause();
+          this.blockManager.seek(1.0);
+        }
       }
     },
-    toggleFollow() {
-      if (this.blockState) {
-        this.blockState.autoFollow = !this.blockState.autoFollow;
-      }
-    },
-    onPlayerChange(e) {
-      if (this.blockManager) {
-        this.blockManager.setPlayerFilter(e.target.value);
-      }
-    },
-    clearPlayerFilter() {
-      if (this.blockManager) {
-        this.blockManager.setPlayerFilter("");
-      }
-    },
-    formatTime(ms) {
-      if (!ms || ms < 0) ms = 0;
-      let totalSec = Math.floor(ms / 1000);
-      let hours = Math.floor(totalSec / 3600);
-      let minutes = Math.floor((totalSec % 3600) / 60);
-      let seconds = totalSec % 60;
-
-      if (hours > 0) {
-        return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
-      }
-      return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+    formatClock(ts) {
+      if (!ts) return "00:00:00";
+      let d = new Date(ts);
+      let h = String(d.getHours()).padStart(2, "0");
+      let m = String(d.getMinutes()).padStart(2, "0");
+      let s = String(d.getSeconds()).padStart(2, "0");
+      return `${h}:${m}:${s}`;
     }
   }
 };
@@ -333,7 +420,7 @@ export default {
 <style lang="scss" scoped>
 .timelapse-container {
   position: absolute;
-  bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
   left: 50%;
   transform: translateX(-50%);
   z-index: 10001;
@@ -343,195 +430,401 @@ export default {
   align-items: center;
   user-select: none;
   font-family: inherit;
-  width: calc(100% - 24px);
-  max-width: 540px;
+  width: calc(100% - 32px);
+  max-width: 580px;
   touch-action: manipulation;
   transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 
-  .collapsed-container {
+  /* Toast Notification */
+  .timelapse-toast {
     display: flex;
     align-items: center;
     gap: 8px;
+    background: rgba(15, 23, 42, 0.95);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(0, 229, 255, 0.4);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6), 0 0 14px rgba(0, 229, 255, 0.25);
+    border-radius: 20px;
+    padding: 8px 16px;
+    margin-bottom: 10px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #e2e8f0;
+
+    .toast-icon {
+      font-size: 0.9rem;
+    }
+
+    .toast-text {
+      color: #38bdf8;
+    }
+  }
+
+  .toast-anim-enter-active, .toast-anim-leave-active {
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .toast-anim-enter-from, .toast-anim-leave-to {
+    opacity: 0;
+    transform: translateY(10px) scale(0.95);
+  }
+
+  /* Collapsed Pill */
+  .collapsed-container {
+    display: flex;
+    align-items: center;
+    gap: 12px;
 
     .timelapse-toggle-btn {
       display: flex;
       align-items: center;
-      gap: 8px;
-      background: rgba(16, 20, 30, 0.92);
-      backdrop-filter: blur(14px);
-      -webkit-backdrop-filter: blur(14px);
-      color: #f0f0f0;
-      border: 1px solid rgba(255, 255, 255, 0.22);
-      border-radius: 28px;
-      padding: 10px 18px;
+      gap: 10px;
+      background: rgba(15, 23, 42, 0.92);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      color: #f8fafc;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 30px;
+      padding: 10px 22px;
       font-size: 0.92rem;
       font-weight: 600;
       cursor: pointer;
-      box-shadow: 0 6px 22px rgba(0, 0, 0, 0.5);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
       touch-action: manipulation;
       transition: all 0.2s ease;
 
       &:hover, &:active {
-        background: rgba(28, 34, 48, 0.98);
-        border-color: #00e5ff;
+        background: rgba(30, 41, 59, 0.98);
+        border-color: #38bdf8;
         transform: translateY(-2px);
-        box-shadow: 0 8px 24px rgba(0, 229, 255, 0.25);
+        box-shadow: 0 10px 28px rgba(56, 189, 248, 0.25);
       }
 
       .icon {
-        font-size: 1.1rem;
-      }
-
-      .badge {
-        background: #00e5ff;
-        color: #000;
-        font-size: 0.75rem;
-        font-weight: 700;
-        padding: 2px 7px;
-        border-radius: 10px;
+        font-size: 1.15rem;
       }
 
       .live-dot-mini {
         width: 8px;
         height: 8px;
         border-radius: 50%;
-        background: #4caf50;
+        background: #22c55e;
 
         &.pulsing {
-          background: #00e5ff;
-          box-shadow: 0 0 8px #00e5ff;
-          animation: pulse 1.5s infinite;
+          background: #38bdf8;
+          box-shadow: 0 0 10px #38bdf8;
+          animation: pulse-glow 1.5s infinite;
         }
       }
     }
 
     .quick-sync-btn {
-      background: rgba(16, 20, 30, 0.92);
-      backdrop-filter: blur(14px);
-      -webkit-backdrop-filter: blur(14px);
-      color: #00e5ff;
-      border: 1px solid rgba(0, 229, 255, 0.35);
+      background: rgba(15, 23, 42, 0.92);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      color: #38bdf8;
+      border: 1px solid rgba(56, 189, 248, 0.35);
       border-radius: 50%;
-      width: 42px;
-      height: 42px;
+      width: 44px;
+      height: 44px;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 1.15rem;
+      font-size: 1.2rem;
       cursor: pointer;
-      box-shadow: 0 6px 22px rgba(0, 0, 0, 0.5);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
       touch-action: manipulation;
       transition: all 0.2s ease;
 
       &:hover, &:active {
-        background: rgba(0, 229, 255, 0.2);
-        border-color: #00e5ff;
+        background: rgba(56, 189, 248, 0.2);
+        border-color: #38bdf8;
         transform: scale(1.06);
       }
 
       &.syncing {
-        border-color: #ffb74d;
-        color: #ffb74d;
+        border-color: #f59e0b;
+        color: #f59e0b;
       }
     }
   }
 
+  /* Main Expanded Panel */
   .timelapse-panel {
     width: 100%;
     box-sizing: border-box;
-    background: rgba(14, 18, 28, 0.94);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
+    background: rgba(15, 23, 42, 0.95);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
     border: 1px solid rgba(255, 255, 255, 0.16);
-    border-radius: 18px;
-    padding: 12px 14px;
-    box-shadow: 0 10px 36px rgba(0, 0, 0, 0.65);
+    border-radius: 22px;
+    padding: 14px 18px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.7);
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 12px;
 
+    /* Row 1: Header */
     .panel-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
+      gap: 12px;
 
       .header-left {
         display: flex;
         align-items: center;
-        gap: 6px;
+        gap: 10px;
+        flex-wrap: wrap;
 
-        .icon {
-          font-size: 1.05rem;
+        .title-group {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+
+          .icon {
+            font-size: 1.15rem;
+          }
+
+          .title {
+            font-weight: 700;
+            font-size: 0.95rem;
+            color: #f8fafc;
+            letter-spacing: -0.2px;
+          }
         }
 
-        .title {
-          font-weight: 700;
-          font-size: 0.92rem;
-          color: #fff;
-        }
-
-        .badge {
-          background: rgba(0, 229, 255, 0.15);
-          border: 1px solid rgba(0, 229, 255, 0.35);
-          color: #00e5ff;
-          font-size: 0.72rem;
-          font-weight: 700;
-          padding: 2px 7px;
-          border-radius: 8px;
-        }
-
-        .sync-status-badge {
-          background: rgba(76, 175, 80, 0.2);
-          border: 1px solid rgba(76, 175, 80, 0.5);
-          color: #81c784;
-          font-size: 0.72rem;
-          font-weight: 700;
-          padding: 2px 6px;
-          border-radius: 6px;
-        }
-
-        .user-chip {
+        /* Calendar Chip */
+        .calendar-chip {
           position: relative;
           display: flex;
           align-items: center;
-          gap: 4px;
+          gap: 6px;
           background: rgba(255, 255, 255, 0.08);
           border: 1px solid rgba(255, 255, 255, 0.18);
-          border-radius: 14px;
-          padding: 3px 8px;
-          margin-left: 4px;
+          border-radius: 16px;
+          padding: 5px 12px;
           cursor: pointer;
-          transition: all 0.15s ease;
+          transition: all 0.2s ease;
           user-select: none;
 
           &:hover, &.open {
             background: rgba(255, 255, 255, 0.14);
-            border-color: rgba(255, 213, 79, 0.5);
-          }
-
-          &.active {
-            border-color: #ffd54f;
-            background: rgba(255, 213, 79, 0.14);
+            border-color: rgba(56, 189, 248, 0.6);
           }
 
           .chip-icon {
-            font-size: 0.75rem;
+            font-size: 0.85rem;
           }
 
           .chip-label {
-            color: #ffd54f;
-            font-size: 0.74rem;
+            color: #38bdf8;
+            font-size: 0.82rem;
             font-weight: 600;
-            max-width: 90px;
+            white-space: nowrap;
+          }
+
+          .chip-arrow {
+            font-size: 0.7rem;
+            color: rgba(255, 255, 255, 0.6);
+            transition: transform 0.2s ease;
+            &.rotated {
+              transform: rotate(180deg);
+            }
+          }
+
+          /* Glassmorphism Calendar Dropdown Menu */
+          .calendar-dropdown-menu {
+            position: absolute;
+            bottom: calc(100% + 10px);
+            left: 0;
+            width: 270px;
+            background: rgba(15, 23, 42, 0.98);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 18px;
+            padding: 12px;
+            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8);
+            z-index: 10020;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+
+            .cal-header {
+              display: flex;
+              align-items: center;
+              justify-content: space-between;
+              padding: 0 4px;
+
+              .cal-title {
+                font-weight: 700;
+                font-size: 0.88rem;
+                color: #f8fafc;
+              }
+
+              .cal-nav-btn {
+                background: rgba(255, 255, 255, 0.08);
+                border: 1px solid rgba(255, 255, 255, 0.14);
+                color: #e2e8f0;
+                width: 26px;
+                height: 26px;
+                border-radius: 8px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 1rem;
+                cursor: pointer;
+                transition: all 0.15s ease;
+
+                &:hover {
+                  background: rgba(255, 255, 255, 0.2);
+                  color: #fff;
+                }
+              }
+            }
+
+            .cal-weekdays {
+              display: grid;
+              grid-template-columns: repeat(7, 1fr);
+              text-align: center;
+              font-size: 0.72rem;
+              font-weight: 600;
+              color: #64748b;
+              padding: 4px 0 2px;
+
+              .sun { color: #f87171; }
+              .sat { color: #60a5fa; }
+            }
+
+            .cal-days-grid {
+              display: grid;
+              grid-template-columns: repeat(7, 1fr);
+              gap: 3px;
+
+              .cal-day-cell {
+                position: relative;
+                height: 32px;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                border-radius: 8px;
+                font-size: 0.78rem;
+                font-weight: 500;
+                color: #cbd5e1;
+                cursor: pointer;
+                transition: all 0.15s ease;
+
+                &.blank {
+                  cursor: default;
+                }
+
+                &:not(.blank):hover {
+                  background: rgba(255, 255, 255, 0.12);
+                  color: #fff;
+                }
+
+                &.today {
+                  border: 1px solid rgba(56, 189, 248, 0.5);
+                  font-weight: 700;
+                }
+
+                &.selected {
+                  background: linear-gradient(135deg, #0284c7, #2563eb) !important;
+                  color: #fff !important;
+                  font-weight: 700;
+                  box-shadow: 0 2px 10px rgba(37, 99, 235, 0.4);
+                }
+
+                .data-dot {
+                  width: 4px;
+                  height: 4px;
+                  border-radius: 50%;
+                  background: #38bdf8;
+                  margin-top: 1px;
+                }
+
+                &.selected .data-dot {
+                  background: #fff;
+                }
+              }
+            }
+
+            .cal-quick-actions {
+              display: flex;
+              gap: 6px;
+              padding-top: 6px;
+              border-top: 1px solid rgba(255, 255, 255, 0.1);
+
+              .cal-quick-btn {
+                flex: 1;
+                background: rgba(255, 255, 255, 0.08);
+                border: 1px solid rgba(255, 255, 255, 0.14);
+                color: #cbd5e1;
+                border-radius: 8px;
+                padding: 5px 0;
+                font-size: 0.74rem;
+                font-weight: 600;
+                cursor: pointer;
+                transition: all 0.15s ease;
+
+                &:hover {
+                  background: rgba(255, 255, 255, 0.16);
+                  color: #fff;
+                }
+
+                &.record-btn {
+                  color: #38bdf8;
+                  border-color: rgba(56, 189, 248, 0.3);
+                }
+              }
+            }
+          }
+        }
+
+        /* User Chip */
+        .user-chip {
+          position: relative;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          background: rgba(255, 255, 255, 0.08);
+          border: 1px solid rgba(255, 255, 255, 0.18);
+          border-radius: 16px;
+          padding: 5px 12px;
+          cursor: pointer;
+          transition: all 0.2s ease;
+          user-select: none;
+
+          &:hover, &.open {
+            background: rgba(255, 255, 255, 0.14);
+            border-color: rgba(245, 158, 11, 0.6);
+          }
+
+          &.active {
+            border-color: #f59e0b;
+            background: rgba(245, 158, 11, 0.14);
+          }
+
+          .chip-icon {
+            font-size: 0.82rem;
+          }
+
+          .chip-label {
+            color: #f59e0b;
+            font-size: 0.82rem;
+            font-weight: 600;
+            max-width: 100px;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
           }
 
           .chip-arrow {
-            font-size: 0.65rem;
+            font-size: 0.7rem;
             color: rgba(255, 255, 255, 0.6);
-            transition: transform 0.15s ease;
+            transition: transform 0.2s ease;
             &.rotated {
               transform: rotate(180deg);
             }
@@ -542,8 +835,8 @@ export default {
             border: none;
             color: #f87171;
             border-radius: 50%;
-            width: 14px;
-            height: 14px;
+            width: 15px;
+            height: 15px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -560,156 +853,45 @@ export default {
 
           .user-dropdown-menu {
             position: absolute;
-            bottom: calc(100% + 8px);
-            left: 0;
-            min-width: 135px;
-            max-width: 200px;
-            max-height: 180px;
-            overflow-y: auto;
-            background: rgba(18, 22, 34, 0.96);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            border-radius: 12px;
-            padding: 4px;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.75);
-            z-index: 10010;
-            display: flex;
-            flex-direction: column;
-            gap: 2px;
-
-            .dropdown-item {
-              display: flex;
-              align-items: center;
-              justify-content: space-between;
-              padding: 6px 10px;
-              border-radius: 8px;
-              font-size: 0.76rem;
-              font-weight: 500;
-              color: #e2e8f0;
-              cursor: pointer;
-              transition: background 0.15s ease;
-
-              &:hover {
-                background: rgba(255, 255, 255, 0.1);
-                color: #fff;
-              }
-
-              &.selected {
-                color: #ffd54f;
-                font-weight: 700;
-                background: rgba(255, 213, 79, 0.15);
-              }
-
-              .item-name {
-                white-space: nowrap;
-                overflow: hidden;
-                text-overflow: ellipsis;
-              }
-
-              .check {
-                font-size: 0.7rem;
-                margin-left: 6px;
-                color: #ffd54f;
-              }
-            }
-          }
-        }
-
-        .date-chip {
-          position: relative;
-          display: flex;
-          align-items: center;
-          gap: 4px;
-          background: rgba(255, 255, 255, 0.08);
-          border: 1px solid rgba(255, 255, 255, 0.18);
-          border-radius: 14px;
-          padding: 3px 8px;
-          margin-left: 2px;
-          cursor: pointer;
-          transition: all 0.15s ease;
-          user-select: none;
-
-          &:hover, &.open {
-            background: rgba(255, 255, 255, 0.14);
-            border-color: rgba(0, 229, 255, 0.5);
-          }
-
-          &.active {
-            border-color: #00e5ff;
-            background: rgba(0, 229, 255, 0.14);
-          }
-
-          .chip-icon {
-            font-size: 0.75rem;
-          }
-
-          .chip-label {
-            color: #00e5ff;
-            font-size: 0.74rem;
-            font-weight: 600;
-            max-width: 90px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-          }
-
-          .chip-arrow {
-            font-size: 0.65rem;
-            color: rgba(255, 255, 255, 0.6);
-            transition: transform 0.15s ease;
-            &.rotated {
-              transform: rotate(180deg);
-            }
-          }
-
-          .date-dropdown-menu {
-            position: absolute;
-            bottom: calc(100% + 8px);
+            bottom: calc(100% + 10px);
             left: 0;
             min-width: 140px;
             max-width: 200px;
-            max-height: 200px;
+            max-height: 190px;
             overflow-y: auto;
-            background: rgba(18, 22, 34, 0.96);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
+            background: rgba(15, 23, 42, 0.98);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
             border: 1px solid rgba(255, 255, 255, 0.2);
-            border-radius: 12px;
-            padding: 4px;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.75);
-            z-index: 10010;
+            border-radius: 16px;
+            padding: 5px;
+            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8);
+            z-index: 10020;
             display: flex;
             flex-direction: column;
             gap: 2px;
-
-            .dropdown-divider {
-              height: 1px;
-              background: rgba(255, 255, 255, 0.12);
-              margin: 3px 0;
-            }
 
             .dropdown-item {
               display: flex;
               align-items: center;
               justify-content: space-between;
-              padding: 6px 10px;
-              border-radius: 8px;
-              font-size: 0.76rem;
+              padding: 7px 12px;
+              border-radius: 10px;
+              font-size: 0.78rem;
               font-weight: 500;
               color: #e2e8f0;
               cursor: pointer;
               transition: background 0.15s ease;
 
               &:hover {
-                background: rgba(255, 255, 255, 0.1);
+                background: rgba(255, 255, 255, 0.12);
                 color: #fff;
               }
 
               &.selected {
-                color: #00e5ff;
+                color: #f59e0b;
                 font-weight: 700;
-                background: rgba(0, 229, 255, 0.15);
+                background: rgba(245, 158, 11, 0.18);
               }
 
               .item-name {
@@ -719,9 +901,9 @@ export default {
               }
 
               .check {
-                font-size: 0.7rem;
+                font-size: 0.72rem;
                 margin-left: 6px;
-                color: #00e5ff;
+                color: #f59e0b;
               }
             }
           }
@@ -731,117 +913,120 @@ export default {
       .header-right {
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: 10px;
 
         .sync-btn {
-          background: rgba(0, 229, 255, 0.12);
-          border: 1px solid rgba(0, 229, 255, 0.3);
-          color: #00e5ff;
-          width: 26px;
-          height: 26px;
+          background: rgba(56, 189, 248, 0.12);
+          border: 1px solid rgba(56, 189, 248, 0.35);
+          color: #38bdf8;
+          width: 32px;
+          height: 32px;
           border-radius: 50%;
-          font-size: 0.82rem;
+          font-size: 0.9rem;
           display: flex;
           align-items: center;
           justify-content: center;
           cursor: pointer;
           touch-action: manipulation;
-          transition: all 0.15s ease;
+          transition: all 0.2s ease;
 
-          &:hover, &:active {
-            background: rgba(0, 229, 255, 0.25);
-            border-color: #00e5ff;
+          &:hover {
+            background: rgba(56, 189, 248, 0.25);
+            transform: scale(1.06);
           }
 
           &.syncing {
-            color: #ffb74d;
-            border-color: #ffb74d;
-            background: rgba(255, 183, 77, 0.15);
+            border-color: #f59e0b;
+            color: #f59e0b;
+          }
+
+          .sync-icon.spinning {
+            animation: spin 1s linear infinite;
           }
         }
 
         .live-pill-btn {
           display: flex;
           align-items: center;
-          gap: 5px;
-          background: rgba(255, 255, 255, 0.06);
-          border: 1px solid rgba(255, 255, 255, 0.12);
-          border-radius: 12px;
-          padding: 3px 8px;
+          gap: 6px;
+          background: rgba(255, 255, 255, 0.08);
+          border: 1px solid rgba(255, 255, 255, 0.18);
+          border-radius: 16px;
+          padding: 5px 12px;
           cursor: pointer;
-          transition: all 0.15s ease;
+          touch-action: manipulation;
+          transition: all 0.2s ease;
+
+          &:hover {
+            background: rgba(255, 255, 255, 0.15);
+          }
+
+          &.active {
+            background: rgba(34, 197, 94, 0.16);
+            border-color: #22c55e;
+          }
 
           .live-dot {
             width: 7px;
             height: 7px;
             border-radius: 50%;
-            background: #4ade80;
+            background: #64748b;
+            transition: all 0.2s ease;
 
             &.pulsing {
-              background: #00e5ff;
-              box-shadow: 0 0 8px #00e5ff;
-              animation: pulse 1.5s infinite;
+              background: #22c55e;
+              box-shadow: 0 0 8px #22c55e;
+              animation: pulse-glow 1.5s infinite;
             }
           }
 
           .live-text {
-            font-size: 0.72rem;
-            font-weight: 600;
-            color: #94a3b8;
-          }
-
-          &.active {
-            background: rgba(0, 229, 255, 0.15);
-            border-color: rgba(0, 229, 255, 0.4);
-
-            .live-text {
-              color: #00e5ff;
-            }
-          }
-
-          &:hover {
-            background: rgba(255, 255, 255, 0.12);
+            font-size: 0.78rem;
+            font-weight: 700;
+            color: #e2e8f0;
           }
         }
 
         .close-btn {
-          background: rgba(255, 255, 255, 0.1);
+          background: transparent;
           border: none;
-          color: #aaa;
-          font-size: 0.82rem;
+          color: #94a3b8;
+          font-size: 0.95rem;
+          cursor: pointer;
+          width: 28px;
+          height: 28px;
           border-radius: 50%;
-          width: 24px;
-          height: 24px;
           display: flex;
           align-items: center;
           justify-content: center;
-          cursor: pointer;
-          touch-action: manipulation;
           transition: all 0.15s ease;
 
-          &:hover, &:active {
-            background: rgba(255, 255, 255, 0.25);
+          &:hover {
+            background: rgba(255, 255, 255, 0.15);
             color: #fff;
           }
         }
       }
     }
 
+    /* Row 2: Slider */
     .slider-row {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 12px;
+      padding: 2px 4px;
 
       .time-label {
-        font-size: 0.78rem;
+        font-size: 0.8rem;
         font-variant-numeric: tabular-nums;
         font-weight: 600;
-        color: #888;
-        min-width: 40px;
+        color: #64748b;
+        min-width: 54px;
 
         &.current {
-          color: #00e5ff;
+          color: #38bdf8;
           text-align: right;
+          font-weight: 700;
         }
       }
 
@@ -855,7 +1040,7 @@ export default {
           position: absolute;
           left: 0;
           height: 6px;
-          background: linear-gradient(90deg, #0091ea, #00e5ff);
+          background: linear-gradient(90deg, #0284c7, #38bdf8);
           border-radius: 3px;
           pointer-events: none;
           z-index: 1;
@@ -868,7 +1053,7 @@ export default {
           height: 6px;
           -webkit-appearance: none;
           appearance: none;
-          background: rgba(255, 255, 255, 0.15);
+          background: rgba(255, 255, 255, 0.14);
           border-radius: 3px;
           outline: none;
           cursor: pointer;
@@ -881,152 +1066,110 @@ export default {
             height: 20px;
             border-radius: 50%;
             background: #ffffff;
-            border: 2px solid #00e5ff;
-            box-shadow: 0 0 10px rgba(0, 229, 255, 0.8);
+            border: 2px solid #38bdf8;
+            box-shadow: 0 0 12px rgba(56, 189, 248, 0.8);
             cursor: pointer;
             transition: transform 0.1s ease;
 
             &:active {
-              transform: scale(1.3);
+              transform: scale(1.25);
             }
           }
         }
       }
     }
 
+    /* Row 3: Controls */
     .controls-row {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 6px;
+      gap: 12px;
+      padding-top: 2px;
 
       .main-action-group {
         display: flex;
         align-items: center;
-        gap: 5px;
+        gap: 8px;
       }
 
       .ctrl-btn {
         background: rgba(255, 255, 255, 0.08);
-        border: 1px solid rgba(255, 255, 255, 0.14);
-        color: #eee;
-        border-radius: 8px;
-        padding: 6px 11px;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        color: #f1f5f9;
+        border-radius: 12px;
+        padding: 7px 14px;
         font-size: 0.82rem;
         font-weight: 600;
         cursor: pointer;
         display: flex;
         align-items: center;
         justify-content: center;
-        gap: 4px;
+        gap: 6px;
         touch-action: manipulation;
         transition: all 0.15s ease;
 
-        &:hover, &:active {
-          background: rgba(255, 255, 255, 0.18);
+        &:hover {
+          background: rgba(255, 255, 255, 0.16);
+          border-color: rgba(255, 255, 255, 0.3);
         }
 
         &.jump-btn {
-          padding: 6px 9px;
-          font-size: 0.9rem;
+          color: #94a3b8;
+          &:hover {
+            color: #fff;
+          }
         }
 
         &.play-btn {
           background: linear-gradient(135deg, #0284c7, #2563eb);
-          border: 1px solid rgba(56, 189, 248, 0.4);
+          border: 1px solid rgba(56, 189, 248, 0.5);
           color: #fff;
           font-weight: 700;
-          padding: 6px 14px;
-          box-shadow: 0 2px 10px rgba(37, 99, 235, 0.35);
+          padding: 7px 16px;
+          box-shadow: 0 3px 12px rgba(37, 99, 235, 0.4);
 
-          &:hover, &:active {
+          &:hover {
             background: linear-gradient(135deg, #0369a1, #1d4ed8);
             transform: translateY(-1px);
           }
 
           &.playing {
             background: linear-gradient(135deg, #e11d48, #be123c);
-            border-color: rgba(244, 63, 94, 0.4);
-            box-shadow: 0 2px 10px rgba(225, 29, 72, 0.35);
-          }
-        }
-
-        &.follow-btn {
-          font-size: 0.78rem;
-          padding: 6px 9px;
-
-          &.active {
-            background: #ff9800;
-            color: #000;
-            font-weight: 700;
+            border-color: rgba(244, 63, 94, 0.5);
+            box-shadow: 0 3px 12px rgba(225, 29, 72, 0.4);
           }
         }
       }
 
       .speed-group {
         display: flex;
-        gap: 2px;
+        gap: 3px;
         background: rgba(0, 0, 0, 0.35);
-        padding: 2px;
-        border-radius: 7px;
+        padding: 3px;
+        border-radius: 10px;
 
         .speed-btn {
           background: transparent;
           border: none;
-          color: #888;
-          font-size: 0.72rem;
+          color: #94a3b8;
+          font-size: 0.74rem;
           font-weight: 600;
-          padding: 4px 6px;
-          border-radius: 5px;
+          padding: 4px 7px;
+          border-radius: 7px;
           cursor: pointer;
           touch-action: manipulation;
+          transition: all 0.15s ease;
+
+          &:hover {
+            color: #fff;
+            background: rgba(255, 255, 255, 0.1);
+          }
 
           &.active {
-            background: rgba(255, 255, 255, 0.22);
-            color: #fff;
-          }
-
-          &:hover:not(.active), &:active:not(.active) {
-            color: #ddd;
-          }
-        }
-      }
-
-      /* Mobile layout adjustments */
-      @media (max-width: 520px) {
-        flex-direction: column;
-        align-items: stretch;
-        gap: 7px;
-
-        .main-action-group {
-          display: flex;
-          justify-content: space-between;
-          gap: 5px;
-          width: 100%;
-
-          .ctrl-btn {
-            flex: 1;
-            padding: 8px 3px;
-            font-size: 0.8rem;
-            min-height: 38px;
-          }
-
-          .play-btn {
-            flex: 1.3;
-          }
-        }
-
-        .speed-group {
-          display: flex;
-          justify-content: space-between;
-          width: 100%;
-
-          .speed-btn {
-            flex: 1;
-            text-align: center;
-            padding: 6px 2px;
-            font-size: 0.76rem;
-            min-height: 30px;
+            background: rgba(255, 255, 255, 0.2);
+            color: #38bdf8;
+            font-weight: 700;
           }
         }
       }
@@ -1034,19 +1177,24 @@ export default {
   }
 }
 
-@keyframes pulse {
-  0% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.3; transform: scale(1.2); }
-  100% { opacity: 1; transform: scale(1); }
-}
-
 @keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
+  100% {
+    transform: rotate(360deg);
+  }
 }
 
-.sync-icon.spinning {
-  display: inline-block;
-  animation: spin 0.7s linear infinite;
+@keyframes pulse-glow {
+  0% {
+    transform: scale(0.95);
+    opacity: 0.85;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.95);
+    opacity: 0.85;
+  }
 }
 </style>

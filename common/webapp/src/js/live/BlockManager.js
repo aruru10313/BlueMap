@@ -193,16 +193,15 @@ export class BlockManager {
             totalEvents: 0,
             renderedBlocks: 0,
             recentPlacedCount: 0,
-            autoFollow: false,
             selectedPlayer: "",
             playersList: [],
-            dateFilterMode: "all",
-            selectedDate: "",
+            selectedDate: this.formatDateKey(new Date()),
             availableDates: [],
             latestPlayer: null,
             latestBlock: null,
             isSyncing: false,
-            syncStatusText: ""
+            syncStatusText: "",
+            toastMessage: ""
         });
 
         // Event records storage
@@ -387,8 +386,20 @@ export class BlockManager {
         this.data.totalEvents = this.eventsList.length;
         this.updateAvailableDates();
 
-        // If initial load or in real-time mode, keep cursor at latest and rebuild
-        if (isInitial || (!this.data.isPlaying && this.data.progress >= 0.99)) {
+        // If initial load or in real-time mode on today, keep cursor at latest and rebuild
+        if (isInitial) {
+            let today = this.formatDateKey(new Date());
+            if (this.data.availableDates.includes(today) || this.data.availableDates.length === 0) {
+                this.data.selectedDate = today;
+                this.data.progress = 1.0;
+                this.data.currentTime = this.data.serverEndTime;
+            } else {
+                this.data.selectedDate = this.data.availableDates[0];
+                this.data.progress = 1.0;
+                this.data.currentTime = this.getDayBounds(this.data.selectedDate).end;
+            }
+            this.rebuildActiveBlocks(this.data.currentTime);
+        } else if (this.isViewingToday() && !this.data.isPlaying && this.data.progress >= 0.999) {
             this.data.currentTime = this.data.serverEndTime;
             this.rebuildActiveBlocks(this.data.currentTime);
         }
@@ -405,27 +416,24 @@ export class BlockManager {
                     this.spawnPulse(evt.x, evt.y, evt.z);
                 }
             }
-
-            if (this.data.autoFollow && this.mapViewer && lastEvt) {
-                this.focusOnBlock(lastEvt.x, lastEvt.y, lastEvt.z);
-            }
         }
 
         if (this.mapViewer) {
             this.mapViewer.redraw();
         }
     }
-
-    rebuildActiveBlocks(upToTime) {
+rebuildActiveBlocks(upToTime) {
         this.activeBlocks.clear();
         let targetTime = upToTime !== undefined ? upToTime : this.data.currentTime;
         let playerFilter = this.data.selectedPlayer;
-        let bounds = this.getDateFilterBounds();
-        let minTime = bounds.start;
+        let bounds = this.getDayBounds(this.data.selectedDate);
 
         for (let evt of this.eventsList) {
-            if (evt.t > targetTime) continue; // Not yet placed at this point in timeline
-            if (evt.t < minTime) continue; // Outside selected date filter
+            // Must belong to the selected day
+            if (evt.t < bounds.start || evt.t > bounds.end) continue;
+            // If the event is in the future relative to the scrubber, do not display it!
+            if (evt.t > targetTime) continue;
+            // Player filter
             if (playerFilter && evt.p !== playerFilter) continue;
 
             let key = `${evt.x},${evt.y},${evt.z}`;
@@ -466,6 +474,7 @@ export class BlockManager {
         }
 
         this.instancedMesh.count = count;
+        this.instancedMesh.visible = count > 0;
         this.instancedMesh.instanceMatrix.needsUpdate = true;
         if (this.instancedMesh.instanceColor) {
             this.instancedMesh.instanceColor.needsUpdate = true;
@@ -496,14 +505,13 @@ export class BlockManager {
     }
 
     onFrame(deltaMs) {
-        let deltaSec = deltaMs / 1000;
-
-        // Update real-time pulses (2-second lifetime)
+        // Pulse animations
         if (this.pulses.length > 0) {
+            let deltaSec = deltaMs / 1000;
             for (let i = this.pulses.length - 1; i >= 0; i--) {
                 let p = this.pulses[i];
-                p.life -= deltaSec * 0.5; // 2 seconds total pulse duration
-                p.scale += deltaSec * 0.15;
+                p.life -= deltaSec * 0.5;
+                p.scale += deltaSec * 0.4;
                 p.mesh.scale.set(p.scale, p.scale, p.scale);
                 p.mesh.material.opacity = Math.max(0, p.life);
 
@@ -519,7 +527,7 @@ export class BlockManager {
 
         // Timelapse playback
         if (this.data.isPlaying) {
-            let bounds = this.getDateFilterBounds();
+            let bounds = this.getDayBounds(this.data.selectedDate);
             let totalSpan = Math.max(1000, bounds.end - bounds.start);
             // Speed factor: 1x = real-time, 10x = 10x faster
             let advanceMs = deltaMs * this.data.speed;
@@ -538,8 +546,8 @@ export class BlockManager {
             if (this.mapViewer) {
                 this.mapViewer.redraw();
             }
-        } else if (this.data.progress >= 0.99) {
-            // Smoothly advance time in real-time live mode
+        } else if (this.isViewingToday() && this.data.progress >= 0.999) {
+            // Smoothly advance time in real-time live mode ONLY if viewing today at 100%
             if (this.data.currentTime < this.data.serverEndTime) {
                 this.data.currentTime = Math.min(this.data.serverEndTime, this.data.currentTime + deltaMs);
             }
@@ -554,61 +562,117 @@ export class BlockManager {
         }
     }
 
-    setDateFilter(mode, dateStr = "") {
-        this.data.dateFilterMode = mode;
-        this.data.selectedDate = dateStr;
-        this.seek(1.0);
+    formatDateKey(date) {
+        let d = new Date(date);
+        let y = d.getFullYear();
+        let m = String(d.getMonth() + 1).padStart(2, "0");
+        let day = String(d.getDate()).padStart(2, "0");
+        return `${y}-${m}-${day}`;
     }
 
-    getDateFilterBounds() {
-        let firstEventTime = this.eventsList.length > 0 ? this.eventsList[0].t : this.data.serverStartTime;
-        let globalStart = Math.min(this.data.serverStartTime, firstEventTime - 5000);
-        let globalEnd = Math.max(Date.now(), this.data.serverEndTime);
+    isViewingToday() {
+        return this.data.selectedDate === this.formatDateKey(new Date());
+    }
 
-        let startOfToday = new Date();
-        startOfToday.setHours(0, 0, 0, 0);
+    getDayBounds(dateStr) {
+        if (!dateStr) dateStr = this.formatDateKey(new Date());
+        let parts = dateStr.split("-").map(Number);
+        let start = new Date(parts[0], parts[1] - 1, parts[2], 0, 0, 0, 0).getTime();
+        let isToday = dateStr === this.formatDateKey(new Date());
+        let end;
+        if (isToday) {
+            end = Math.max(Date.now(), this.data.serverEndTime);
+        } else {
+            end = new Date(parts[0], parts[1] - 1, parts[2], 23, 59, 59, 999).getTime();
+        }
+        return { start, end };
+    }
 
-        if (this.data.dateFilterMode === "today") {
-            return {
-                start: Math.min(startOfToday.getTime(), firstEventTime - 1000),
-                end: globalEnd
-            };
-        } else if (this.data.dateFilterMode === "yesterday") {
-            let startOfYesterday = new Date(startOfToday.getTime() - 86400000);
-            let endOfYesterday = new Date(startOfToday.getTime() - 1);
-            return {
-                start: startOfYesterday.getTime(),
-                end: endOfYesterday.getTime()
-            };
-        } else if (this.data.dateFilterMode === "date" && this.data.selectedDate) {
-            let parts = this.data.selectedDate.split("-").map(Number);
-            let s = new Date(parts[0], parts[1] - 1, parts[2], 0, 0, 0, 0).getTime();
-            let e = new Date(parts[0], parts[1] - 1, parts[2], 23, 59, 59, 999).getTime();
-            return { start: s, end: e };
+    getNearestDate(targetDateStr) {
+        if (!this.data.availableDates || this.data.availableDates.length === 0) {
+            return this.formatDateKey(new Date());
+        }
+        if (this.data.availableDates.includes(targetDateStr)) {
+            return targetDateStr;
         }
 
-        return {
-            start: globalStart,
-            end: globalEnd
-        };
+        let targetTime = new Date(targetDateStr).getTime();
+        let closestDate = this.data.availableDates[0];
+        let minDiff = Infinity;
+
+        for (let d of this.data.availableDates) {
+            let diff = Math.abs(new Date(d).getTime() - targetTime);
+            if (diff < minDiff) {
+                minDiff = diff;
+                closestDate = d;
+            }
+        }
+        return closestDate;
+    }
+
+    selectDate(dateStr) {
+        let hasData = this.data.availableDates.includes(dateStr);
+        let actualDate = dateStr;
+
+        if (!hasData) {
+            actualDate = this.getNearestDate(dateStr);
+            let targetFormatted = this.formatPrettyDate(dateStr);
+            let nearestFormatted = this.formatPrettyDate(actualDate);
+            this.showToast(`${targetFormatted}에는 건축 기록이 없어 가장 가까운 ${nearestFormatted} 데이터로 이동했습니다.`);
+        }
+
+        this.data.selectedDate = actualDate;
+        this.data.isPlaying = false;
+
+        let bounds = this.getDayBounds(actualDate);
+        if (this.isViewingToday()) {
+            this.data.progress = 1.0;
+            this.data.currentTime = bounds.end;
+        } else {
+            this.data.progress = 0.0;
+            this.data.currentTime = bounds.start;
+        }
+
+        this.rebuildActiveBlocks(this.data.currentTime);
+        if (this.mapViewer) {
+            this.mapViewer.redraw();
+        }
+    }
+
+    showToast(msg) {
+        this.data.toastMessage = msg;
+        if (this._toastTimer) clearTimeout(this._toastTimer);
+        this._toastTimer = setTimeout(() => {
+            this.data.toastMessage = "";
+        }, 4000);
+    }
+
+    formatPrettyDate(dateStr) {
+        if (!dateStr) return "";
+        let parts = dateStr.split("-");
+        if (parts.length === 3) {
+            return `${Number(parts[1])}월 ${Number(parts[2])}일`;
+        }
+        return dateStr;
     }
 
     updateAvailableDates() {
         let dates = new Set();
         for (let evt of this.eventsList) {
             if (!evt.t) continue;
-            let d = new Date(evt.t);
-            let y = d.getFullYear();
-            let m = String(d.getMonth() + 1).padStart(2, "0");
-            let day = String(d.getDate()).padStart(2, "0");
-            dates.add(`${y}-${m}-${day}`);
+            dates.add(this.formatDateKey(evt.t));
         }
         this.data.availableDates = Array.from(dates).sort().reverse();
+
+        if (!this.data.selectedDate) {
+            let today = this.formatDateKey(new Date());
+            this.data.selectedDate = this.data.availableDates.includes(today) ? today : (this.data.availableDates[0] || today);
+        }
     }
 
     seek(progress) {
         this.data.progress = Math.max(0.0, Math.min(1.0, progress));
-        let bounds = this.getDateFilterBounds();
+        let bounds = this.getDayBounds(this.data.selectedDate);
         let totalSpan = Math.max(1000, bounds.end - bounds.start);
         this.data.currentTime = bounds.start + totalSpan * this.data.progress;
         this.rebuildActiveBlocks(this.data.currentTime);
