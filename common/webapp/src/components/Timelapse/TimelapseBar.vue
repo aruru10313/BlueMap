@@ -431,7 +431,7 @@ export default {
   user-select: none;
   font-family: inherit;
   width: calc(100% - 32px);
-  max-width: 580px;
+  max-width: 680px;
   touch-action: manipulation;
   transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 
@@ -570,20 +570,25 @@ export default {
       justify-content: space-between;
       align-items: center;
       gap: 12px;
+      flex-wrap: nowrap;
+      min-height: 32px;
 
       .header-left {
         display: flex;
         align-items: center;
-        gap: 10px;
-        flex-wrap: wrap;
+        gap: 8px;
+        flex-wrap: nowrap;
+        min-width: 0;
 
         .title-group {
           display: flex;
           align-items: center;
           gap: 6px;
+          flex-shrink: 0;
 
           .icon {
             font-size: 1.15rem;
+            line-height: 1;
           }
 
           .title {
@@ -591,22 +596,27 @@ export default {
             font-size: 0.95rem;
             color: #f8fafc;
             letter-spacing: -0.2px;
+            white-space: nowrap;
           }
         }
 
         /* Calendar Chip */
         .calendar-chip {
           position: relative;
-          display: flex;
+          display: inline-flex;
           align-items: center;
           gap: 6px;
+          height: 32px;
+          box-sizing: border-box;
           background: rgba(255, 255, 255, 0.08);
           border: 1px solid rgba(255, 255, 255, 0.18);
           border-radius: 16px;
-          padding: 5px 12px;
+          padding: 0 11px;
           cursor: pointer;
           transition: all 0.2s ease;
           user-select: none;
+          flex-shrink: 0;
+          white-space: nowrap;
 
           &:hover, &.open {
             background: rgba(255, 255, 255, 0.14);
@@ -615,6 +625,7 @@ export default {
 
           .chip-icon {
             font-size: 0.85rem;
+            line-height: 1;
           }
 
           .chip-label {
@@ -622,11 +633,13 @@ export default {
             font-size: 0.82rem;
             font-weight: 600;
             white-space: nowrap;
+            line-height: 1;
           }
 
           .chip-arrow {
             font-size: 0.7rem;
             color: rgba(255, 255, 255, 0.6);
+            line-height: 1;
             transition: transform 0.2s ease;
             &.rotated {
               transform: rotate(180deg);
@@ -786,16 +799,20 @@ export default {
         /* User Chip */
         .user-chip {
           position: relative;
-          display: flex;
+          display: inline-flex;
           align-items: center;
           gap: 6px;
+          height: 32px;
+          box-sizing: border-box;
           background: rgba(255, 255, 255, 0.08);
           border: 1px solid rgba(255, 255, 255, 0.18);
           border-radius: 16px;
-          padding: 5px 12px;
+          padding: 0 11px;
           cursor: pointer;
           transition: all 0.2s ease;
           user-select: none;
+          flex-shrink: 0;
+          white-space: nowrap;
 
           &:hover, &.open {
             background: rgba(255, 255, 255, 0.14);
@@ -809,21 +826,24 @@ export default {
 
           .chip-icon {
             font-size: 0.82rem;
+            line-height: 1;
           }
 
           .chip-label {
             color: #f59e0b;
             font-size: 0.82rem;
             font-weight: 600;
-            max-width: 100px;
+            max-width: 90px;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+            line-height: 1;
           }
 
           .chip-arrow {
             font-size: 0.7rem;
             color: rgba(255, 255, 255, 0.6);
+            line-height: 1;
             transition: transform 0.2s ease;
             &.rotated {
               transform: rotate(180deg);
@@ -844,6 +864,7 @@ export default {
             cursor: pointer;
             padding: 0;
             margin-left: 2px;
+            line-height: 1;
 
             &:hover {
               background: rgba(248, 113, 113, 0.35);
@@ -913,7 +934,9 @@ export default {
       .header-right {
         display: flex;
         align-items: center;
-        gap: 10px;
+        gap: 8px;
+        flex-shrink: 0;
+        flex-wrap: nowrap;
 
         .sync-btn {
           background: rgba(56, 189, 248, 0.12);
@@ -921,13 +944,16 @@ export default {
           color: #38bdf8;
           width: 32px;
           height: 32px;
+          min-width: 32px;
           border-radius: 50%;
           font-size: 0.9rem;
-          display: flex;
+          display: inline-flex;
           align-items: center;
           justify-content: center;
           cursor: pointer;
           touch-action: manipulation;
+          box-sizing: border-box;
+          flex-shrink: 0;
           transition: all 0.2s ease;
 
           &:hover {
@@ -946,15 +972,19 @@ export default {
         }
 
         .live-pill-btn {
-          display: flex;
+          display: inline-flex;
           align-items: center;
           gap: 6px;
           background: rgba(255, 255, 255, 0.08);
           border: 1px solid rgba(255, 255, 255, 0.18);
           border-radius: 16px;
-          padding: 5px 12px;
+          height: 32px;
+          padding: 0 12px;
           cursor: pointer;
           touch-action: manipulation;
+          box-sizing: border-box;
+          flex-shrink: 0;
+          white-space: nowrap;
           transition: all 0.2s ease;
 
           &:hover {
@@ -971,6 +1001,7 @@ export default {
             height: 7px;
             border-radius: 50%;
             background: #64748b;
+            flex-shrink: 0;
             transition: all 0.2s ease;
 
             &.pulsing {
@@ -981,9 +1012,11 @@ export default {
           }
 
           .live-text {
-            font-size: 0.78rem;
+            font-size: 0.8rem;
             font-weight: 700;
             color: #e2e8f0;
+            white-space: nowrap;
+            line-height: 1;
           }
         }
 
@@ -991,14 +1024,17 @@ export default {
           background: transparent;
           border: none;
           color: #94a3b8;
-          font-size: 0.95rem;
+          font-size: 1rem;
           cursor: pointer;
-          width: 28px;
-          height: 28px;
+          width: 32px;
+          height: 32px;
+          min-width: 32px;
           border-radius: 50%;
-          display: flex;
+          display: inline-flex;
           align-items: center;
           justify-content: center;
+          box-sizing: border-box;
+          flex-shrink: 0;
           transition: all 0.15s ease;
 
           &:hover {
@@ -1171,6 +1207,53 @@ export default {
             color: #38bdf8;
             font-weight: 700;
           }
+        }
+      }
+    }
+
+    @media (max-width: 640px) {
+      padding: 10px 12px;
+      gap: 10px;
+
+      .panel-header {
+        gap: 6px;
+
+        .header-left {
+          gap: 6px;
+
+          .title-group .title {
+            display: none;
+          }
+
+          .calendar-chip {
+            padding: 0 8px;
+            font-size: 0.78rem;
+          }
+
+          .user-chip {
+            padding: 0 8px;
+            font-size: 0.78rem;
+          }
+        }
+
+        .header-right {
+          gap: 6px;
+
+          .live-pill-btn {
+            padding: 0 8px;
+          }
+        }
+      }
+
+      .controls-row {
+        .ctrl-btn {
+          padding: 6px 10px;
+          font-size: 0.76rem;
+        }
+
+        .speed-group .speed-btn {
+          padding: 3px 5px;
+          font-size: 0.7rem;
         }
       }
     }
