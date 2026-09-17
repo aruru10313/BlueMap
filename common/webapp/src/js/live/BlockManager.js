@@ -352,13 +352,26 @@ export class BlockManager {
             this.latestSeq = Math.max(this.latestSeq, payload.latestSeq);
         }
 
-        // Update unique players list
-        if (!this.knownPlayers) this.knownPlayers = new Set();
-        if (isInitial) this.knownPlayers.clear();
-        for (let evt of (isInitial ? this.eventsList : newEvents)) {
-            if (evt.p) this.knownPlayers.add(evt.p);
+        // Update unique players list only when changes occur
+        let playersChanged = false;
+        if (!this.knownPlayers) {
+            this.knownPlayers = new Set();
+            playersChanged = true;
         }
-        this.data.playersList = Array.from(this.knownPlayers).sort();
+        if (isInitial) {
+            this.knownPlayers.clear();
+            playersChanged = true;
+        }
+        let checkEvents = isInitial ? this.eventsList : newEvents;
+        for (let evt of checkEvents) {
+            if (evt.p && !this.knownPlayers.has(evt.p)) {
+                this.knownPlayers.add(evt.p);
+                playersChanged = true;
+            }
+        }
+        if (playersChanged) {
+            this.data.playersList = Array.from(this.knownPlayers).sort();
+        }
 
         // Keep bounded list on client
         if (this.eventsList.length > this.maxInstances) {

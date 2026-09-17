@@ -27,16 +27,34 @@
           <span class="badge">{{ blockState.renderedBlocks }} / {{ blockState.totalEvents }}</span>
           <span v-if="blockState.syncStatusText" class="sync-status-badge">{{ blockState.syncStatusText }}</span>
 
-          <!-- Inline compact user selector chip -->
-          <div class="user-chip">
+          <!-- Inline compact user selector chip with custom flicker-free dropdown -->
+          <div class="user-chip" :class="{'active': blockState.selectedPlayer, 'open': userDropdownOpen}" @click.stop="toggleUserDropdown" title="유저별 타임랩스 필터">
             <span class="chip-icon">👤</span>
-            <select class="user-chip-select" :value="blockState.selectedPlayer" @change="onPlayerChange" title="유저별 타임랩스 필터">
-              <option value="">전체 유저</option>
-              <option v-for="player in blockState.playersList" :key="player" :value="player">
-                {{ player }}
-              </option>
-            </select>
-            <button v-if="blockState.selectedPlayer" class="chip-clear" @click="clearPlayerFilter" title="전체 유저로">✕</button>
+            <span class="chip-label">{{ blockState.selectedPlayer || '전체 유저' }}</span>
+            <span class="chip-arrow" :class="{'rotated': userDropdownOpen}">▾</span>
+            <button v-if="blockState.selectedPlayer" class="chip-clear" @click.stop="clearPlayerFilter" title="전체 유저로">✕</button>
+
+            <!-- Custom Dropdown Menu -->
+            <div v-if="userDropdownOpen" class="user-dropdown-menu" @click.stop>
+              <div
+                  class="dropdown-item"
+                  :class="{'selected': !blockState.selectedPlayer}"
+                  @click="selectPlayer('')"
+              >
+                <span class="item-name">👤 전체 유저</span>
+                <span v-if="!blockState.selectedPlayer" class="check">✓</span>
+              </div>
+              <div
+                  v-for="player in blockState.playersList"
+                  :key="player"
+                  class="dropdown-item"
+                  :class="{'selected': blockState.selectedPlayer === player}"
+                  @click="selectPlayer(player)"
+              >
+                <span class="item-name">{{ player }}</span>
+                <span v-if="blockState.selectedPlayer === player" class="check">✓</span>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -113,6 +131,17 @@
 <script>
 export default {
   name: "TimelapseBar",
+  data() {
+    return {
+      userDropdownOpen: false
+    };
+  },
+  mounted() {
+    document.addEventListener("click", this.handleDocumentClick);
+  },
+  beforeUnmount() {
+    document.removeEventListener("click", this.handleDocumentClick);
+  },
   computed: {
     appState() {
       return this.$bluemap ? this.$bluemap.appState : null;
@@ -125,6 +154,20 @@ export default {
     }
   },
   methods: {
+    handleDocumentClick(e) {
+      if (this.userDropdownOpen && !this.$el?.querySelector(".user-chip")?.contains(e.target)) {
+        this.userDropdownOpen = false;
+      }
+    },
+    toggleUserDropdown() {
+      this.userDropdownOpen = !this.userDropdownOpen;
+    },
+    selectPlayer(player) {
+      if (this.blockManager) {
+        this.blockManager.setPlayerFilter(player);
+      }
+      this.userDropdownOpen = false;
+    },
     toggleOpen() {
       if (this.blockManager) {
         this.blockManager.toggleTimelapse();
@@ -353,33 +396,49 @@ export default {
         }
 
         .user-chip {
+          position: relative;
           display: flex;
           align-items: center;
           gap: 4px;
           background: rgba(255, 255, 255, 0.08);
-          border: 1px solid rgba(255, 255, 255, 0.16);
+          border: 1px solid rgba(255, 255, 255, 0.18);
           border-radius: 14px;
-          padding: 2px 8px;
+          padding: 3px 8px;
           margin-left: 4px;
+          cursor: pointer;
+          transition: all 0.15s ease;
+          user-select: none;
+
+          &:hover, &.open {
+            background: rgba(255, 255, 255, 0.14);
+            border-color: rgba(255, 213, 79, 0.5);
+          }
+
+          &.active {
+            border-color: #ffd54f;
+            background: rgba(255, 213, 79, 0.14);
+          }
 
           .chip-icon {
             font-size: 0.75rem;
           }
 
-          .user-chip-select {
-            background: transparent;
-            border: none;
+          .chip-label {
             color: #ffd54f;
             font-size: 0.74rem;
             font-weight: 600;
-            outline: none;
-            cursor: pointer;
-            padding: 0;
+            max-width: 90px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }
 
-            option {
-              background: #181b26;
-              color: #fff;
-              font-weight: normal;
+          .chip-arrow {
+            font-size: 0.65rem;
+            color: rgba(255, 255, 255, 0.6);
+            transition: transform 0.15s ease;
+            &.rotated {
+              transform: rotate(180deg);
             }
           }
 
@@ -399,7 +458,65 @@ export default {
             margin-left: 2px;
 
             &:hover {
-              background: rgba(248, 113, 113, 0.3);
+              background: rgba(248, 113, 113, 0.35);
+              color: #ff4d4f;
+            }
+          }
+
+          .user-dropdown-menu {
+            position: absolute;
+            bottom: calc(100% + 8px);
+            left: 0;
+            min-width: 135px;
+            max-width: 200px;
+            max-height: 180px;
+            overflow-y: auto;
+            background: rgba(18, 22, 34, 0.96);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
+            padding: 4px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.75);
+            z-index: 10010;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+
+            .dropdown-item {
+              display: flex;
+              align-items: center;
+              justify-content: space-between;
+              padding: 6px 10px;
+              border-radius: 8px;
+              font-size: 0.76rem;
+              font-weight: 500;
+              color: #e2e8f0;
+              cursor: pointer;
+              transition: background 0.15s ease;
+
+              &:hover {
+                background: rgba(255, 255, 255, 0.1);
+                color: #fff;
+              }
+
+              &.selected {
+                color: #ffd54f;
+                font-weight: 700;
+                background: rgba(255, 213, 79, 0.15);
+              }
+
+              .item-name {
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+              }
+
+              .check {
+                font-size: 0.7rem;
+                margin-left: 6px;
+                color: #ffd54f;
+              }
             }
           }
         }
