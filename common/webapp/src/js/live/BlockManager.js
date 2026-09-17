@@ -422,33 +422,64 @@ export class BlockManager {
             this.mapViewer.redraw();
         }
     }
-rebuildActiveBlocks(upToTime) {
+    rebuildActiveBlocks(upToTime) {
         this.activeBlocks.clear();
         let targetTime = upToTime !== undefined ? upToTime : this.data.currentTime;
         let playerFilter = this.data.selectedPlayer;
         let bounds = this.getDayBounds(this.data.selectedDate);
 
+        // Group today's events by position
+        let positionEvents = new Map();
         for (let evt of this.eventsList) {
-            // Must belong to the selected day
             if (evt.t < bounds.start || evt.t > bounds.end) continue;
-            // If the event is in the future relative to the scrubber, do not display it!
-            if (evt.t > targetTime) continue;
-            // Player filter
-            if (playerFilter && evt.p !== playerFilter) continue;
-
             let key = `${evt.x},${evt.y},${evt.z}`;
-            if (evt.a === "place") {
-                this.activeBlocks.set(key, {
-                    x: evt.x,
-                    y: evt.y,
-                    z: evt.z,
-                    color: getBlockColor(evt.b),
-                    b: evt.b,
-                    p: evt.p,
-                    t: evt.t
-                });
-            } else if (evt.a === "break") {
-                this.activeBlocks.delete(key);
+            let list = positionEvents.get(key);
+            if (!list) {
+                list = [];
+                positionEvents.set(key, list);
+            }
+            list.push(evt);
+        }
+
+        // For each position, determine block state at targetTime
+        for (let [key, events] of positionEvents.entries()) {
+            let firstEvt = events[0];
+            let currentState = null;
+
+            // If the first event on this day was a break, it means the block was already present at start of day
+            if (firstEvt.a === "break") {
+                currentState = {
+                    x: firstEvt.x,
+                    y: firstEvt.y,
+                    z: firstEvt.z,
+                    color: getBlockColor(firstEvt.b),
+                    b: firstEvt.b,
+                    p: firstEvt.p,
+                    t: firstEvt.t
+                };
+            }
+
+            // Replay events chronologically up to targetTime
+            for (let evt of events) {
+                if (evt.t > targetTime) break; // Not happened yet at current timeline point
+                if (evt.a === "place") {
+                    currentState = {
+                        x: evt.x,
+                        y: evt.y,
+                        z: evt.z,
+                        color: getBlockColor(evt.b),
+                        b: evt.b,
+                        p: evt.p,
+                        t: evt.t
+                    };
+                } else if (evt.a === "break") {
+                    currentState = null;
+                }
+            }
+
+            if (currentState) {
+                if (playerFilter && currentState.p !== playerFilter) continue;
+                this.activeBlocks.set(key, currentState);
             }
         }
 
