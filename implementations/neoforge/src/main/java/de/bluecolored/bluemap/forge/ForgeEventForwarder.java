@@ -36,6 +36,7 @@ import net.neoforged.neoforge.event.level.BlockEvent;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.List;
 import java.util.UUID;
 
 public class ForgeEventForwarder {
@@ -91,6 +92,26 @@ public class ForgeEventForwarder {
         for (ServerEventListener listener : eventListeners) {
             listener.onBlockChange(world, pos.getX(), pos.getY(), pos.getZ(), blockId, player, true);
         }
+
+        // Check if placed block is a sign, delay read text after player closes GUI
+        if (evt.getPlacedBlock().getBlock() instanceof net.minecraft.world.level.block.SignBlock) {
+            final String finalPlayer = player;
+            new java.util.Timer().schedule(new java.util.TimerTask() {
+                @Override
+                public void run() {
+                    level.getServer().execute(() -> {
+                        if (level.getBlockEntity(pos) instanceof net.minecraft.world.level.block.entity.SignBlockEntity sign) {
+                            String text = extractSignText(sign);
+                            if (text != null) {
+                                for (ServerEventListener listener : eventListeners) {
+                                    listener.onBlockChange(world, pos.getX(), pos.getY(), pos.getZ(), blockId, finalPlayer, true, text);
+                                }
+                            }
+                        }
+                    });
+                }
+            }, 2500);
+        }
     }
 
     @SubscribeEvent
@@ -108,6 +129,65 @@ public class ForgeEventForwarder {
         for (ServerEventListener listener : eventListeners) {
             listener.onBlockChange(world, pos.getX(), pos.getY(), pos.getZ(), blockId, player, false);
         }
+    }
+
+    @SubscribeEvent
+    public synchronized void onExplosion(net.neoforged.neoforge.event.level.ExplosionEvent.Detonate evt) {
+        if (forgeMod == null) return;
+        if (!(evt.getLevel() instanceof ServerLevel level)) return;
+        ServerWorld world = forgeMod.getServerWorld(level);
+        if (world == null) return;
+
+        String player = "Explosion";
+        var explosion = evt.getExplosion();
+        if (explosion != null) {
+            if (explosion.getIndirectSourceEntity() instanceof Player p) {
+                player = p.getGameProfile().getName();
+            } else if (explosion.getDirectSourceEntity() instanceof Player p) {
+                player = p.getGameProfile().getName();
+            } else if (explosion.getDirectSourceEntity() != null) {
+                player = explosion.getDirectSourceEntity().getType().getDescription().getString();
+            }
+        }
+
+        for (BlockPos pos : evt.getAffectedBlocks()) {
+            String blockId = BuiltInRegistries.BLOCK.getKey(level.getBlockState(pos).getBlock()).toString();
+            for (ServerEventListener listener : eventListeners) {
+                listener.onBlockChange(world, pos.getX(), pos.getY(), pos.getZ(), blockId, player, false);
+            }
+        }
+    }
+
+    @SubscribeEvent
+    public synchronized void onRightClickBlock(net.neoforged.neoforge.event.entity.player.PlayerInteractEvent.RightClickBlock evt) {
+        if (forgeMod == null) return;
+        if (!(evt.getLevel() instanceof ServerLevel level)) return;
+        ServerWorld world = forgeMod.getServerWorld(level);
+        if (world == null) return;
+        BlockPos pos = evt.getPos();
+        if (level.getBlockEntity(pos) instanceof net.minecraft.world.level.block.entity.SignBlockEntity sign) {
+            String text = extractSignText(sign);
+            if (text != null) {
+                String blockId = BuiltInRegistries.BLOCK.getKey(level.getBlockState(pos).getBlock()).toString();
+                String player = evt.getEntity().getGameProfile().getName();
+                for (ServerEventListener listener : eventListeners) {
+                    listener.onBlockChange(world, pos.getX(), pos.getY(), pos.getZ(), blockId, player, true, text);
+                }
+            }
+        }
+    }
+
+    private String extractSignText(net.minecraft.world.level.block.entity.SignBlockEntity sign) {
+        List<String> lines = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            String l = sign.getFrontText().getMessage(i, false).getString().trim();
+            if (!l.isEmpty()) lines.add(l);
+        }
+        for (int i = 0; i < 4; i++) {
+            String l = sign.getBackText().getMessage(i, false).getString().trim();
+            if (!l.isEmpty()) lines.add("(뒤) " + l);
+        }
+        return lines.isEmpty() ? null : String.join(" | ", lines);
     }
 
 }

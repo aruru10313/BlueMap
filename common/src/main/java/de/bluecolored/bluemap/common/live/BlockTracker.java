@@ -203,15 +203,23 @@ public class BlockTracker implements AutoCloseable {
     }
 
     public void addBlock(ServerWorld world, int x, int y, int z, String block, @Nullable String player, boolean placement) {
+        addBlock(world, x, y, z, block, player, placement, null);
+    }
+
+    public void addBlock(ServerWorld world, int x, int y, int z, String block, @Nullable String player, boolean placement, @Nullable String message) {
         if (world == null) return;
-        addBlock(world.getDimension(), x, y, z, block, player, placement);
+        addBlock(world.getDimension(), x, y, z, block, player, placement, message);
     }
 
     public void addBlock(Key dimension, int x, int y, int z, String block, @Nullable String player, boolean placement) {
+        addBlock(dimension, x, y, z, block, player, placement, null);
+    }
+
+    public void addBlock(Key dimension, int x, int y, int z, String block, @Nullable String player, boolean placement, @Nullable String message) {
         if (dimension == null) return;
         long seq = seqGenerator.incrementAndGet();
         long now = System.currentTimeMillis();
-        BlockRecord record = new BlockRecord(seq, now, x, y, z, block, player, placement);
+        BlockRecord record = new BlockRecord(seq, now, x, y, z, block, player, placement, message);
         WorldBlockHistory history = worldHistories.computeIfAbsent(dimension, k -> new WorldBlockHistory());
         history.add(record);
 

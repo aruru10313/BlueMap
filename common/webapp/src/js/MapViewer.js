@@ -75,7 +75,7 @@ export class MapViewer {
 			},
 			superSampling: 1,
 			loadedCenter: new Vector2(0, 0),
-			loadedHiresViewDistance: 200,
+			loadedHiresViewDistance: 500,
 			loadedLowresViewDistance: 2000,
 		});
 
@@ -222,30 +222,43 @@ export class MapViewer {
 
 			let intersects = this.raycaster.intersectObjects(intersectScenes, true);
 			if (data.hover) {
-				this.markers.traverse(object => {
-					if (object.data?.type === "popup" && object.close) object.close();
-				});
+				let foundMarker = null;
+				let foundIntersection = null;
 
 				for (let i = 0; i < intersects.length; i++) {
 					let marker = intersects[i].object;
-					while (marker && (!marker.onHover || marker.data?.type !== "extrude") && marker.parent) {
+					while (marker && !marker.onHover && marker.parent) {
 						marker = marker.parent;
 					}
-					if (marker?.onHover && marker.data?.type === "extrude") {
-						if (this.hoveredMarker !== marker) {
-							if (this.hoveredMarker?.onHoverExit) this.hoveredMarker.onHoverExit();
-							this.hoveredMarker = marker;
-							marker.onHover({
-								data: data,
-								intersection: intersects[i]
-							});
-						}
-						return;
+					if (marker && marker.onHover) {
+						foundMarker = marker;
+						foundIntersection = intersects[i];
+						break;
 					}
 				}
 
-				if (this.hoveredMarker?.onHoverExit) this.hoveredMarker.onHoverExit();
-				this.hoveredMarker = null;
+				if (foundMarker) {
+					if (this.hoveredMarker !== foundMarker) {
+						if (this.hoveredMarker?.onHoverExit) this.hoveredMarker.onHoverExit();
+						this.hoveredMarker = foundMarker;
+						foundMarker.onHover({
+							data: data,
+							intersection: foundIntersection
+						});
+					}
+				} else {
+					if (this.hoveredMarker?.onHoverExit) this.hoveredMarker.onHoverExit();
+					this.hoveredMarker = null;
+				}
+
+				// Dispatch hover event with intersections so BlockManager and UI can detect block hovers
+				dispatchEvent(this.events, "bluemapMapHover", {
+					data: data,
+					screenPosition: screenPosition,
+					intersections: intersects,
+					ray: this.raycaster.ray
+				});
+
 				return;
 			}
 
@@ -495,7 +508,7 @@ export class MapViewer {
 
 	updateLoadedMapArea = () => {
 		if (!this.map) return;
-		if (this.controlsManager.distance < 1000) {
+		if (this.controlsManager.distance < 3000) {
 			this.map.loadMapArea(this.data.loadedCenter.x, this.data.loadedCenter.y, this.data.loadedHiresViewDistance, this.data.loadedLowresViewDistance);
 		} else {
 			this.map.loadMapArea(this.data.loadedCenter.x, this.data.loadedCenter.y, 0, this.data.loadedLowresViewDistance);

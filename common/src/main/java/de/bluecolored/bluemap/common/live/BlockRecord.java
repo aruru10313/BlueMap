@@ -36,8 +36,13 @@ public class BlockRecord {
     private final String block;
     private final @Nullable String player;
     private final boolean placement;
+    private final @Nullable String message;
 
     public BlockRecord(long seq, long timestamp, int x, int y, int z, String block, @Nullable String player, boolean placement) {
+        this(seq, timestamp, x, y, z, block, player, placement, null);
+    }
+
+    public BlockRecord(long seq, long timestamp, int x, int y, int z, String block, @Nullable String player, boolean placement, @Nullable String message) {
         this.seq = seq;
         this.timestamp = timestamp;
         this.x = x;
@@ -46,6 +51,7 @@ public class BlockRecord {
         this.block = block;
         this.player = player;
         this.placement = placement;
+        this.message = message;
     }
 
     public long getSeq() {
@@ -80,6 +86,10 @@ public class BlockRecord {
         return placement;
     }
 
+    public @Nullable String getMessage() {
+        return message;
+    }
+
     public void appendJson(StringBuilder sb) {
         sb.append("{\"seq\":").append(seq)
                 .append(",\"t\":").append(timestamp)
@@ -90,6 +100,9 @@ public class BlockRecord {
                 .append(",\"a\":").append(placement ? "\"place\"" : "\"break\"");
         if (player != null) {
             sb.append(",\"p\":").append(escapeJson(player));
+        }
+        if (message != null && !message.isEmpty()) {
+            sb.append(",\"m\":").append(escapeJson(message));
         }
         sb.append('}');
     }
@@ -103,6 +116,7 @@ public class BlockRecord {
             String block = "minecraft:air";
             String player = null;
             boolean placement = true;
+            String message = null;
 
             String trimmed = line.trim();
             if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
@@ -126,9 +140,10 @@ public class BlockRecord {
                     case "b" -> block = v;
                     case "p" -> player = v.equals("null") ? null : v;
                     case "a" -> placement = !"break".equalsIgnoreCase(v);
+                    case "m" -> message = v.equals("null") ? null : v;
                 }
             }
-            return new BlockRecord(seq, timestamp, x, y, z, block, player, placement);
+            return new BlockRecord(seq, timestamp, x, y, z, block, player, placement, message);
         } catch (Exception ex) {
             return null;
         }

@@ -93,7 +93,7 @@ name: "SettingsMenu",
       mapViewer: this.$bluemap.mapViewer.data,
       settings: {
         ...{
-          hiresSliderMax: 500,
+          hiresSliderMax: 2000,
           hiresSliderMin: 50,
           lowresSliderMax: 10000,
           lowresSliderMin: 500

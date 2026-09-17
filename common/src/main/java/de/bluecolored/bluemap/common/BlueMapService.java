@@ -394,11 +394,19 @@ public class BlueMapService implements Closeable {
 
         // load from mods folder
         if (config.getCoreConfig().isScanForModResources() && modsFolder != null && Files.isDirectory(modsFolder)) {
+            Path nestedModsCache = config.getCoreConfig().getData().resolve("cache").resolve("nestedMods");
+            try {
+                Files.createDirectories(nestedModsCache);
+            } catch (IOException ignored) {}
+
             try (Stream<Path> packFiles = Files.list(modsFolder)) {
                 packFiles
                         .filter(Files::isRegularFile)
                         .filter(file -> file.getFileName().toString().endsWith(".jar"))
-                        .forEach(packRoots::add);
+                        .forEach(jarPath -> {
+                            packRoots.add(jarPath);
+                            extractNestedJars(jarPath, nestedModsCache, packRoots);
+                        });
             } catch (IOException e) {
                 throw new ConfigurationException("Failed to access packs folder.", e);
             }
@@ -406,6 +414,29 @@ public class BlueMapService implements Closeable {
 
         packRoots.add(resourceExtensionsFile);
         return packRoots;
+    }
+
+    private void extractNestedJars(Path jarPath, Path nestedModsCache, Deque<Path> packRoots) {
+        try (java.util.zip.ZipFile zip = new java.util.zip.ZipFile(jarPath.toFile())) {
+            var entries = zip.entries();
+            while (entries.hasMoreElements()) {
+                var entry = entries.nextElement();
+                String name = entry.getName();
+                if (!entry.isDirectory() && name.startsWith("META-INF/jarjar/") && name.endsWith(".jar")) {
+                    String baseName = Path.of(name).getFileName().toString();
+                    Path targetFile = nestedModsCache.resolve(baseName);
+                    if (!Files.exists(targetFile) || Files.size(targetFile) != entry.getSize()) {
+                        try (var in = zip.getInputStream(entry)) {
+                            Files.copy(in, targetFile, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                        }
+                    }
+                    packRoots.add(targetFile);
+                    Logger.global.logInfo("Loaded nested mod resources from: " + baseName);
+                }
+            }
+        } catch (Exception ex) {
+            Logger.global.logDebug("Failed to inspect nested jars in: " + jarPath + " (" + ex.getMessage() + ")");
+        }
     }
 
     public synchronized MinecraftVersion getOrLoadMinecraftVersion() throws ConfigurationException {

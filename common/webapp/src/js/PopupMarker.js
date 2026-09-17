@@ -144,6 +144,9 @@ export class PopupMarker extends Marker {
             if (blockInfo) {
                 let timeStr = blockInfo.time ? new Date(blockInfo.time).toLocaleTimeString() : "";
                 let actionBadge = blockInfo.action === "place" ? `<span style="color:#10b981;font-weight:bold;">설치</span>` : `<span style="color:#ef4444;font-weight:bold;">파괴</span>`;
+                let signRow = blockInfo.message ? `
+                            <div class="entry"><span class="label">📜 내용: </span><span class="value" style="color: #6ee7b7; font-weight: 600;">"${blockInfo.message.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}"</span></div>
+                ` : '';
                 this.element.innerHTML += `
                     <hr>
                     <div class="group timelapse-info" style="padding: 2px 0;">
@@ -152,6 +155,7 @@ export class PopupMarker extends Marker {
                             <div class="entry"><span class="label">👤 작업자: </span><span class="value" style="color: #fbbf24; font-weight: bold;">${blockInfo.player}</span></div>
                             <div class="entry"><span class="label">🧱 블록: </span><span class="value">${blockInfo.block} (${actionBadge})</span></div>
                             ${timeStr ? `<div class="entry"><span class="label">🕒 시간: </span><span class="value">${timeStr}</span></div>` : ''}
+                            ${signRow}
                         </div>
                     </div>
                 `;

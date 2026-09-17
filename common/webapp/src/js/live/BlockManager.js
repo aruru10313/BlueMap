@@ -265,6 +265,35 @@ export class BlockManager {
         };
         this._rafId = requestAnimationFrame(tick);
 
+        // Glowing 3D hover highlight box on map
+        const hoverBoxGeo = new WireframeGeometry(new BoxGeometry(1.02, 1.02, 1.02));
+        this.hoverBoxGeo = hoverBoxGeo;
+        this.hoverBoxMaterial = new LineBasicMaterial({
+            color: 0x38bdf8,
+            linewidth: 3,
+            depthTest: false,
+            transparent: true,
+            opacity: 0.95
+        });
+        this.hoverBox = new LineSegments(hoverBoxGeo, this.hoverBoxMaterial);
+        this.hoverBox.renderOrder = 999;
+        this.hoverBox.visible = false;
+        this.sceneGroup.add(this.hoverBox);
+
+        // Floating HTML hover card tooltip
+        this.hoverTooltipEl = document.createElement("div");
+        this.hoverTooltipEl.className = "bm-block-hover-tooltip";
+        this.hoverTooltipEl.style.display = "none";
+        document.body.appendChild(this.hoverTooltipEl);
+
+        // Listen for map hover events from MapViewer
+        if (this.events) {
+            this.events.addEventListener("bluemapMapHover", this.onMapHover);
+        }
+        if (this.mapViewer?.renderer?.domElement) {
+            this.mapViewer.renderer.domElement.addEventListener("mouseleave", this.onMouseLeave);
+        }
+
         // Start initial texture load & history fetch & polling
         this.loadTextures();
         this.fetchFullHistory().then(() => {
@@ -448,7 +477,8 @@ export class BlockManager {
                     color: getBlockColor(firstEvt.b),
                     b: firstEvt.b,
                     p: firstEvt.p,
-                    t: firstEvt.t
+                    t: firstEvt.t,
+                    m: firstEvt.m
                 };
             }
 
@@ -463,7 +493,8 @@ export class BlockManager {
                         color: getBlockColor(evt.b),
                         b: evt.b,
                         p: evt.p,
-                        t: evt.t
+                        t: evt.t,
+                        m: evt.m
                     };
                 } else if (evt.a === "break") {
                     currentState = null;
@@ -497,7 +528,8 @@ export class BlockManager {
                 y: latestReplayedEvt.y,
                 z: latestReplayedEvt.z,
                 action: latestReplayedEvt.a || "place",
-                time: latestReplayedEvt.t
+                time: latestReplayedEvt.t,
+                message: latestReplayedEvt.m || null
             };
         } else {
             this.data.currentAction = null;
@@ -521,7 +553,8 @@ export class BlockManager {
                 y: block.y,
                 z: block.z,
                 action: "place",
-                time: block.t
+                time: block.t,
+                message: block.m || null
             };
         }
 
@@ -537,11 +570,148 @@ export class BlockManager {
                     y: evt.y,
                     z: evt.z,
                     action: evt.a || "place",
-                    time: evt.t
+                    time: evt.t,
+                    message: evt.m || null
                 };
             }
         }
         return null;
+    }
+
+    onMouseLeave = () => {
+        this.hideHoverTooltip();
+    };
+
+    onMapHover = (evt) => {
+        if (!this.data.active || this.disposed) {
+            this.hideHoverTooltip();
+            return;
+        }
+
+        let detail = evt.detail || {};
+        let screenPos = detail.screenPosition;
+        let intersections = detail.intersections || [];
+
+        let foundBlock = null;
+
+        // 1. Check if any intersection hits our instanced meshes or pulse wireframes
+        for (let hit of intersections) {
+            if (!hit.object) continue;
+            if (hit.object.isInstancedMesh && hit.instanceId !== undefined) {
+                let matrix = new Matrix4();
+                hit.object.getMatrixAt(hit.instanceId, matrix);
+                let pos = new Vector3().setFromMatrixPosition(matrix);
+                let bx = Math.floor(pos.x);
+                let by = Math.floor(pos.y);
+                let bz = Math.floor(pos.z);
+                let info = this.getBlockInfo(bx, by, bz);
+                if (info) {
+                    foundBlock = info;
+                    break;
+                }
+            }
+            if (hit.object.parent === this.pulseGroup || hit.object === this.hoverBox) {
+                let bx = Math.floor(hit.object.position.x);
+                let by = Math.floor(hit.object.position.y);
+                let bz = Math.floor(hit.object.position.z);
+                let info = this.getBlockInfo(bx, by, bz);
+                if (info) {
+                    foundBlock = info;
+                    break;
+                }
+            }
+        }
+
+        // 2. Check if terrain hit coordinates match any recorded block in activeBlocks
+        if (!foundBlock) {
+            for (let hit of intersections) {
+                if (!hit.point) continue;
+                let normal = hit.face ? hit.face.normal : new Vector3();
+                let bx = Math.floor(hit.point.x - normal.x * 0.1);
+                let by = Math.floor(hit.point.y - normal.y * 0.1);
+                let bz = Math.floor(hit.point.z - normal.z * 0.1);
+                let info = this.getBlockInfo(bx, by, bz);
+                if (info) {
+                    foundBlock = info;
+                    break;
+                }
+                bx = Math.floor(hit.point.x);
+                by = Math.floor(hit.point.y);
+                bz = Math.floor(hit.point.z);
+                info = this.getBlockInfo(bx, by, bz);
+                if (info) {
+                    foundBlock = info;
+                    break;
+                }
+            }
+        }
+
+        if (foundBlock) {
+            this.showHoverTooltip(foundBlock, screenPos);
+            this.hoverBox.position.set(foundBlock.x + 0.5, foundBlock.y + 0.5, foundBlock.z + 0.5);
+            this.hoverBox.visible = true;
+            if (this.mapViewer) this.mapViewer.redraw();
+        } else {
+            this.hideHoverTooltip();
+        }
+    };
+
+    showHoverTooltip(info, screenPos) {
+        if (!this.hoverTooltipEl) return;
+        let timeStr = info.time ? new Date(info.time).toLocaleTimeString() : "";
+        let isPlace = info.action === "place";
+        let actionClass = isPlace ? "place" : "break";
+        let actionLabel = isPlace ? "🧱 설치" : "⛏️ 파괴";
+        let signHtml = info.message ? `
+            <div class="bm-tooltip-sign">📜 "${this.escapeHtml(info.message)}"</div>
+        ` : "";
+
+        this.hoverTooltipEl.innerHTML = `
+            <div class="bm-tooltip-header">
+                <span class="bm-tooltip-badge ${actionClass}">${actionLabel}</span>
+                <span class="bm-tooltip-player">👤 <b>${this.escapeHtml(info.player)}</b></span>
+            </div>
+            <div class="bm-tooltip-block">${this.escapeHtml(info.block)}</div>
+            <div class="bm-tooltip-meta">
+                <span>📍 ${info.x}, ${info.y}, ${info.z}</span>
+                ${timeStr ? `<span>🕒 ${timeStr}</span>` : ""}
+            </div>
+            ${signHtml}
+        `;
+
+        this.hoverTooltipEl.style.display = "block";
+
+        if (screenPos) {
+            let x = screenPos.x + 16;
+            let y = screenPos.y + 16;
+            let winW = window.innerWidth;
+            let winH = window.innerHeight;
+            let rect = this.hoverTooltipEl.getBoundingClientRect();
+            if (x + rect.width > winW - 10) x = screenPos.x - rect.width - 16;
+            if (y + rect.height > winH - 10) y = screenPos.y - rect.height - 16;
+            this.hoverTooltipEl.style.left = `${Math.max(10, x)}px`;
+            this.hoverTooltipEl.style.top = `${Math.max(10, y)}px`;
+        }
+    }
+
+    hideHoverTooltip() {
+        if (this.hoverTooltipEl) {
+            this.hoverTooltipEl.style.display = "none";
+        }
+        if (this.hoverBox && this.hoverBox.visible) {
+            this.hoverBox.visible = false;
+            if (this.mapViewer) this.mapViewer.redraw();
+        }
+    }
+
+    escapeHtml(str) {
+        if (!str) return "";
+        return String(str)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
     }
 
     async loadTextures() {
@@ -1088,9 +1258,24 @@ export class BlockManager {
         this.materialCache.clear();
         this.textureCache.clear();
 
+        if (this.hoverTooltipEl && this.hoverTooltipEl.parentNode) {
+            this.hoverTooltipEl.parentNode.removeChild(this.hoverTooltipEl);
+            this.hoverTooltipEl = null;
+        }
+
+        if (this.events) {
+            this.events.removeEventListener("bluemapMapHover", this.onMapHover);
+        }
+
+        if (this.mapViewer?.renderer?.domElement) {
+            this.mapViewer.renderer.domElement.removeEventListener("mouseleave", this.onMouseLeave);
+        }
+
         if (this.boxGeometry) this.boxGeometry.dispose();
         if (this.wireGeometry) this.wireGeometry.dispose();
         if (this.wireMaterial) this.wireMaterial.dispose();
+        if (this.hoverBoxGeo) this.hoverBoxGeo.dispose();
+        if (this.hoverBoxMaterial) this.hoverBoxMaterial.dispose();
     }
 
 }

@@ -34,4 +34,8 @@ public interface ServerEventListener {
 
     default void onBlockChange(ServerWorld world, int x, int y, int z, String blockId, String player, boolean isPlacement) {};
 
+    default void onBlockChange(ServerWorld world, int x, int y, int z, String blockId, String player, boolean isPlacement, @org.jetbrains.annotations.Nullable String message) {
+        onBlockChange(world, x, y, z, blockId, player, isPlacement);
+    }
+
 }

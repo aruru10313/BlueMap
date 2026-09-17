@@ -613,7 +613,12 @@ public class Plugin implements ServerEventListener {
 
     @Override
     public void onBlockChange(ServerWorld world, int x, int y, int z, String blockId, @Nullable String player, boolean isPlacement) {
-        this.blockTracker.addBlock(world, x, y, z, blockId, player, isPlacement);
+        this.blockTracker.addBlock(world, x, y, z, blockId, player, isPlacement, null);
+    }
+
+    @Override
+    public void onBlockChange(ServerWorld world, int x, int y, int z, String blockId, @Nullable String player, boolean isPlacement, @Nullable String message) {
+        this.blockTracker.addBlock(world, x, y, z, blockId, player, isPlacement, message);
     }
 
     private void checkPausedByPlayerCountSoon() {
