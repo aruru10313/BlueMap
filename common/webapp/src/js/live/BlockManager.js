@@ -257,12 +257,10 @@ export class BlockManager {
         this.activeBlocks = new Map();
         this.activeBlockArray = [];
 
-        this._updateInterval = null;
-        this._stepHandler = (e) => this.onFrame(e.detail ? e.detail.delta : 16);
+        this._tempMatrix = new Matrix4();
+        this._tempColor = new Color();
 
-        if (this.events) {
-            this.events.addEventListener("bluemapRenderFrame", this._stepHandler);
-        }
+        this._updateInterval = null;
 
         let lastTime = performance.now();
         this._rafId = null;
@@ -401,7 +399,9 @@ export class BlockManager {
             this.rebuildActiveBlocks(this.data.currentTime);
         } else if (this.isViewingToday() && !this.data.isPlaying && this.data.progress >= 0.999) {
             this.data.currentTime = this.data.serverEndTime;
-            this.rebuildActiveBlocks(this.data.currentTime);
+            if (newEvents.length > 0) {
+                this.rebuildActiveBlocks(this.data.currentTime);
+            }
         }
 
         // Spawn pulse effect for newly placed blocks in real time
@@ -492,8 +492,8 @@ export class BlockManager {
         let blocks = Array.from(this.activeBlocks.values());
         let count = Math.min(blocks.length, this.maxInstances);
 
-        const matrix = new Matrix4();
-        const color = new Color();
+        const matrix = this._tempMatrix;
+        const color = this._tempColor;
 
         for (let i = 0; i < count; i++) {
             let b = blocks[i];
@@ -506,8 +506,21 @@ export class BlockManager {
 
         this.instancedMesh.count = count;
         this.instancedMesh.visible = count > 0;
+
+        let updateCount = Math.max(1, count);
+        if (this.instancedMesh.instanceMatrix.addUpdateRange) {
+            this.instancedMesh.instanceMatrix.addUpdateRange(0, updateCount * 16);
+        } else {
+            this.instancedMesh.instanceMatrix.updateRange = { offset: 0, count: updateCount * 16 };
+        }
         this.instancedMesh.instanceMatrix.needsUpdate = true;
+
         if (this.instancedMesh.instanceColor) {
+            if (this.instancedMesh.instanceColor.addUpdateRange) {
+                this.instancedMesh.instanceColor.addUpdateRange(0, updateCount * 3);
+            } else {
+                this.instancedMesh.instanceColor.updateRange = { offset: 0, count: updateCount * 3 };
+            }
             this.instancedMesh.instanceColor.needsUpdate = true;
         }
 
@@ -521,6 +534,7 @@ export class BlockManager {
         if (this.pulses.length > 20) {
             let old = this.pulses.shift();
             this.pulseGroup.remove(old.mesh);
+            if (old.mesh.material) old.mesh.material.dispose();
         }
 
         const lines = new LineSegments(this.wireGeometry, this.wireMaterial.clone());
@@ -548,6 +562,7 @@ export class BlockManager {
 
                 if (p.life <= 0) {
                     this.pulseGroup.remove(p.mesh);
+                    if (p.mesh.material) p.mesh.material.dispose();
                     this.pulses.splice(i, 1);
                 }
             }

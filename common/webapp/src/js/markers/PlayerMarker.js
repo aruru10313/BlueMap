@@ -65,6 +65,7 @@ export class PlayerMarker extends Marker {
             this.playerHeadElement.src = "assets/steve.png";
         }, {once: true});
 
+        this.currentAnimation = null;
         this.add(this.elementObject);
     }
 
@@ -133,9 +134,27 @@ export class PlayerMarker extends Marker {
             while (deltaPos.yaw > 180) deltaPos.yaw -= 360;
             while (deltaPos.yaw < -180) deltaPos.yaw += 360;
 
-            if (deltaPos.x || deltaPos.y || deltaPos.z || deltaPos.pitch || deltaPos.yaw) {
-                animate(progress => {
-                    let ease = EasingFunctions.easeInOutCubic(progress);
+            if (Math.hypot(deltaPos.x, deltaPos.z) > 32 || Math.abs(deltaPos.y) > 32) {
+                // Large distance jump (teleport/respawn) - jump directly to avoid flying through unloaded chunks
+                if (this.currentAnimation) {
+                    this.currentAnimation.cancel();
+                    this.currentAnimation = null;
+                }
+                this.position.set(
+                    pos.x || 0,
+                    (pos.y || 0) + 1.8,
+                    pos.z || 0
+                );
+                this.data.rotation.pitch = rot.pitch || 0;
+                this.data.rotation.yaw = rot.yaw || 0;
+            } else if (deltaPos.x || deltaPos.y || deltaPos.z || deltaPos.pitch || deltaPos.yaw) {
+                if (this.currentAnimation) {
+                    this.currentAnimation.cancel();
+                    this.currentAnimation = null;
+                }
+                this.currentAnimation = animate(progress => {
+                    // Linear interpolation provides steady speed matching player walking/flying in Minecraft
+                    let ease = progress;
                     this.position.set(
                         startPos.x + deltaPos.x * ease || 0,
                         startPos.y + deltaPos.y * ease || 0,
@@ -143,7 +162,9 @@ export class PlayerMarker extends Marker {
                     );
                     this.data.rotation.pitch = startPos.pitch + deltaPos.pitch * ease || 0;
                     this.data.rotation.yaw = startPos.yaw + deltaPos.yaw * ease || 0;
-                }, 1000);
+                }, 1000, () => {
+                    this.currentAnimation = null;
+                });
             }
         }
 
@@ -159,6 +180,10 @@ export class PlayerMarker extends Marker {
 
     dispose() {
         super.dispose();
+        if (this.currentAnimation) {
+            this.currentAnimation.cancel();
+            this.currentAnimation = null;
+        }
 
         let element = this.elementObject.element;
         if (element.parentNode) element.parentNode.removeChild(element);
