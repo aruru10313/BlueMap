@@ -167,6 +167,9 @@ public class Plugin implements ServerEventListener {
                     pluginState = new PluginState();
                 }
 
+                // init persistent timelapse block tracker
+                this.blockTracker.init(coreConfig.getData());
+
                 //create bluemap-service
                 blueMap = new BlueMapService(configManager, preloadedResourcePack);
 
@@ -515,6 +518,8 @@ public class Plugin implements ServerEventListener {
 
     public synchronized void save() {
         if (blueMap == null) return;
+
+        this.blockTracker.flush();
 
         if (pluginState != null) {
             try {

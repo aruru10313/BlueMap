@@ -94,6 +94,46 @@ public class BlockRecord {
         sb.append('}');
     }
 
+    public static @Nullable BlockRecord fromJson(String line) {
+        if (line == null || line.isBlank() || !line.startsWith("{")) return null;
+        try {
+            long seq = 0;
+            long timestamp = 0;
+            int x = 0, y = 0, z = 0;
+            String block = "minecraft:air";
+            String player = null;
+            boolean placement = true;
+
+            String trimmed = line.trim();
+            if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+                trimmed = trimmed.substring(1, trimmed.length() - 1);
+            }
+            String[] parts = trimmed.split(",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)");
+            for (String part : parts) {
+                int colon = part.indexOf(':');
+                if (colon == -1) continue;
+                String k = part.substring(0, colon).trim().replace("\"", "");
+                String v = part.substring(colon + 1).trim();
+                if (v.startsWith("\"") && v.endsWith("\"")) {
+                    v = v.substring(1, v.length() - 1);
+                }
+                switch (k) {
+                    case "seq" -> seq = Long.parseLong(v);
+                    case "t" -> timestamp = Long.parseLong(v);
+                    case "x" -> x = Integer.parseInt(v);
+                    case "y" -> y = Integer.parseInt(v);
+                    case "z" -> z = Integer.parseInt(v);
+                    case "b" -> block = v;
+                    case "p" -> player = v.equals("null") ? null : v;
+                    case "a" -> placement = !"break".equalsIgnoreCase(v);
+                }
+            }
+            return new BlockRecord(seq, timestamp, x, y, z, block, player, placement);
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
     private static String escapeJson(String s) {
         if (s == null) return "null";
         StringBuilder sb = new StringBuilder(s.length() + 8);

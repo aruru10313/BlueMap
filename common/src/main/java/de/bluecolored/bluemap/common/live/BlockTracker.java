@@ -25,25 +25,163 @@
 package de.bluecolored.bluemap.common.live;
 
 import de.bluecolored.bluemap.common.serverinterface.ServerWorld;
+import de.bluecolored.bluemap.core.logger.Logger;
 import de.bluecolored.bluemap.core.util.Key;
 import org.jetbrains.annotations.Nullable;
 
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 
-public class BlockTracker {
+public class BlockTracker implements AutoCloseable {
 
     private static final int MAX_EVENTS_PER_WORLD = 100_000;
 
-    private final long serverStartTime;
+    private volatile long serverStartTime;
     private final AtomicLong seqGenerator;
     private final Map<Key, WorldBlockHistory> worldHistories;
+
+    private Path storageDir;
+    private final ConcurrentLinkedQueue<PersistEntry> persistQueue = new ConcurrentLinkedQueue<>();
+    private final ScheduledExecutorService persistExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "BlueMap-Timelapse-Writer");
+        t.setDaemon(true);
+        return t;
+    });
+
+    record PersistEntry(Key dimension, BlockRecord record) {}
 
     public BlockTracker() {
         this.serverStartTime = System.currentTimeMillis();
         this.seqGenerator = new AtomicLong(0);
         this.worldHistories = new ConcurrentHashMap<>();
+
+        // Periodic async disk flush every 2 seconds
+        this.persistExecutor.scheduleWithFixedDelay(this::drainQueueToDisk, 2, 2, TimeUnit.SECONDS);
+    }
+
+    public synchronized void init(Path baseDataDir) {
+        if (baseDataDir == null) return;
+        this.storageDir = baseDataDir.resolve("timelapse");
+        try {
+            Files.createDirectories(this.storageDir);
+            loadPersistedData();
+        } catch (Exception ex) {
+            Logger.global.logError("Failed to initialize timelapse storage directory!", ex);
+        }
+    }
+
+    private void loadPersistedData() {
+        if (storageDir == null || !Files.exists(storageDir)) return;
+
+        Path metadataFile = storageDir.resolve("metadata.json");
+        if (Files.exists(metadataFile)) {
+            try {
+                String metaContent = Files.readString(metadataFile, StandardCharsets.UTF_8).trim();
+                for (String part : metaContent.replace("{", "").replace("}", "").split(",")) {
+                    String[] kv = part.split(":");
+                    if (kv.length == 2) {
+                        String k = kv[0].trim().replace("\"", "");
+                        String v = kv[1].trim();
+                        if (k.equals("serverStartTime")) {
+                            this.serverStartTime = Long.parseLong(v);
+                        } else if (k.equals("latestSeq")) {
+                            long savedSeq = Long.parseLong(v);
+                            this.seqGenerator.set(Math.max(this.seqGenerator.get(), savedSeq));
+                        }
+                    }
+                }
+            } catch (Exception ex) {
+                Logger.global.logWarning("Could not parse timelapse metadata.json: " + ex.getMessage());
+            }
+        }
+
+        // Load all .jsonl files in timelapse/
+        try (var stream = Files.list(storageDir)) {
+            stream.filter(p -> p.toString().endsWith(".jsonl")).forEach(path -> {
+                String fileName = path.getFileName().toString();
+                String dimKeyStr = fileName.substring(0, fileName.length() - 6).replace('_', ':');
+                Key dimensionKey = Key.parse(dimKeyStr);
+                WorldBlockHistory history = worldHistories.computeIfAbsent(dimensionKey, k -> new WorldBlockHistory());
+
+                try (BufferedReader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
+                    String line;
+                    long maxSeq = 0;
+                    while ((line = reader.readLine()) != null) {
+                        BlockRecord record = BlockRecord.fromJson(line);
+                        if (record != null) {
+                            history.add(record);
+                            if (record.getSeq() > maxSeq) {
+                                maxSeq = record.getSeq();
+                            }
+                        }
+                    }
+                    if (maxSeq > seqGenerator.get()) {
+                        seqGenerator.set(maxSeq);
+                    }
+                } catch (Exception ex) {
+                    Logger.global.logWarning("Failed to load timelapse events from " + fileName + ": " + ex.getMessage());
+                }
+            });
+        } catch (Exception ex) {
+            Logger.global.logWarning("Failed to scan timelapse directory: " + ex.getMessage());
+        }
+
+        Logger.global.logInfo("Loaded persistent timelapse history: seq=" + seqGenerator.get() + ", start=" + serverStartTime);
+    }
+
+    private synchronized void drainQueueToDisk() {
+        if (storageDir == null || persistQueue.isEmpty()) return;
+
+        Map<Key, List<BlockRecord>> grouped = new HashMap<>();
+        PersistEntry entry;
+        while ((entry = persistQueue.poll()) != null) {
+            grouped.computeIfAbsent(entry.dimension, k -> new ArrayList<>()).add(entry.record);
+        }
+
+        for (var e : grouped.entrySet()) {
+            Key dim = e.getKey();
+            List<BlockRecord> list = e.getValue();
+            if (list.isEmpty()) continue;
+
+            String safeName = dim.getFormatted().replace(':', '_') + ".jsonl";
+            Path file = storageDir.resolve(safeName);
+
+            try (BufferedWriter writer = Files.newBufferedWriter(file, StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE, StandardOpenOption.APPEND)) {
+                StringBuilder sb = new StringBuilder();
+                for (BlockRecord r : list) {
+                    sb.setLength(0);
+                    r.appendJson(sb);
+                    writer.write(sb.toString());
+                    writer.newLine();
+                }
+            } catch (Exception ex) {
+                Logger.global.logWarning("Failed to persist timelapse records to " + safeName + ": " + ex.getMessage());
+            }
+        }
+
+        saveMetadata();
+    }
+
+    private void saveMetadata() {
+        if (storageDir == null) return;
+        Path meta = storageDir.resolve("metadata.json");
+        String content = "{\"serverStartTime\":" + serverStartTime + ",\"latestSeq\":" + seqGenerator.get() + "}";
+        try {
+            Files.writeString(meta, content, StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+        } catch (Exception ignored) {}
+    }
+
+    public synchronized void flush() {
+        drainQueueToDisk();
     }
 
     public long getServerStartTime() {
@@ -62,6 +200,9 @@ public class BlockTracker {
         BlockRecord record = new BlockRecord(seq, now, x, y, z, block, player, placement);
         WorldBlockHistory history = worldHistories.computeIfAbsent(dimension, k -> new WorldBlockHistory());
         history.add(record);
+
+        // Queue for non-blocking asynchronous persistence
+        persistQueue.add(new PersistEntry(dimension, record));
     }
 
     public String toJson(Key dimension, long sinceSeq) {
@@ -84,6 +225,19 @@ public class BlockTracker {
 
         sb.append("]}");
         return sb.toString();
+    }
+
+    @Override
+    public void close() {
+        persistExecutor.shutdown();
+        try {
+            if (!persistExecutor.awaitTermination(3, TimeUnit.SECONDS)) {
+                persistExecutor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            persistExecutor.shutdownNow();
+        }
+        flush();
     }
 
     private static class WorldBlockHistory {
