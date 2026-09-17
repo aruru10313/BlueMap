@@ -46,7 +46,9 @@ jobs:
           npm run build
 
       - name: Build NeoForge 1.21.1
-        run: ./gradlew :neoforge:release --no-daemon --stacktrace
+        run: |
+          ./gradlew spotlessApply --no-daemon
+          ./gradlew :neoforge:mergeShadowAndJarJar :neoforge:release --no-daemon --stacktrace
 
       - name: Upload NeoForge Mod Artifact
         uses: actions/upload-artifact@v4

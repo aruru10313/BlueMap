@@ -99,7 +99,7 @@ val mergeShadowAndJarJar = tasks.create<Jar>("mergeShadowAndJarJar") {
 
 tasks.getByName<CopyFileTask>("release") {
     dependsOn( mergeShadowAndJarJar )
-    inputFile = mergeShadowAndJarJar.outputs.files.singleFile
+    inputFile.set(mergeShadowAndJarJar.flatMap { it.archiveFile })
 }
 
 modrinth {
