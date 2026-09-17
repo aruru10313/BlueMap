@@ -155,14 +155,6 @@
           >
             🎯 추적
           </button>
-          <button
-              class="ctrl-btn highlight-btn"
-              :class="{'active': blockState.highlightOnly}"
-              @click="toggleHighlight"
-              :title="blockState.highlightOnly ? '2초 강조 모드: 블록이 2초간 보이고 사라집니다' : '누적 모드: 설치된 블록이 사라지지 않고 유지됩니다'"
-          >
-            {{ blockState.highlightOnly ? '✨ 2초 강조' : '🏗 누적' }}
-          </button>
         </div>
 
         <!-- Speed Segmented Control -->
@@ -254,11 +246,6 @@ export default {
       }
       this.dateDropdownOpen = false;
     },
-    toggleHighlight() {
-      if (this.blockManager) {
-        this.blockManager.toggleHighlightOnly();
-      }
-    },
     formatDateLabel(dateStr) {
       if (!dateStr) return "";
       let parts = dateStr.split("-");
@@ -302,13 +289,14 @@ export default {
     },
     jumpStart() {
       if (this.blockManager) {
+        this.blockManager.pause();
         this.blockManager.seek(0.0);
       }
     },
     jumpEnd() {
       if (this.blockManager) {
-        this.blockManager.seek(1.0);
         this.blockManager.pause();
+        this.blockManager.seek(1.0);
       }
     },
     toggleFollow() {
@@ -971,19 +959,6 @@ export default {
             background: #ff9800;
             color: #000;
             font-weight: 700;
-          }
-        }
-
-        &.highlight-btn {
-          font-size: 0.76rem;
-          padding: 6px 9px;
-
-          &.active {
-            background: rgba(0, 229, 255, 0.2);
-            border-color: #00e5ff;
-            color: #00e5ff;
-            font-weight: 700;
-            box-shadow: 0 0 10px rgba(0, 229, 255, 0.25);
           }
         }
       }

@@ -194,7 +194,6 @@ export class BlockManager {
             renderedBlocks: 0,
             recentPlacedCount: 0,
             autoFollow: false,
-            highlightOnly: true,
             selectedPlayer: "",
             playersList: [],
             dateFilterMode: "all",
@@ -205,8 +204,6 @@ export class BlockManager {
             isSyncing: false,
             syncStatusText: ""
         });
-
-        this.highlightDurationMs = 2000;
 
         // Event records storage
         this.eventsList = [];
@@ -423,20 +420,14 @@ export class BlockManager {
         this.activeBlocks.clear();
         let targetTime = upToTime !== undefined ? upToTime : this.data.currentTime;
         let playerFilter = this.data.selectedPlayer;
-        let isHighlightOnly = this.data.highlightOnly !== false;
         let bounds = this.getDateFilterBounds();
         let minTime = bounds.start;
 
-        if (isHighlightOnly) {
-            let speed = this.data.isPlaying ? (this.data.speed || 1) : 1;
-            let windowMs = (this.highlightDurationMs || 2000) * speed;
-            minTime = Math.max(minTime, targetTime - windowMs);
-        }
-
         for (let evt of this.eventsList) {
-            if (evt.t > targetTime) continue; // Do not abort early, safely continue
-            if (isHighlightOnly && evt.t < minTime) continue; // Only show blocks within 2-second window
+            if (evt.t > targetTime) continue; // Not yet placed at this point in timeline
+            if (evt.t < minTime) continue; // Outside selected date filter
             if (playerFilter && evt.p !== playerFilter) continue;
+
             let key = `${evt.x},${evt.y},${evt.z}`;
             if (evt.a === "place") {
                 this.activeBlocks.set(key, {
@@ -449,20 +440,7 @@ export class BlockManager {
                     t: evt.t
                 });
             } else if (evt.a === "break") {
-                if (isHighlightOnly) {
-                    this.activeBlocks.set(key, {
-                        x: evt.x,
-                        y: evt.y,
-                        z: evt.z,
-                        color: 0xff3b30, // Red highlight for broken block
-                        b: evt.b,
-                        p: evt.p,
-                        t: evt.t,
-                        isBreak: true
-                    });
-                } else {
-                    this.activeBlocks.delete(key);
-                }
+                this.activeBlocks.delete(key);
             }
         }
 
@@ -565,30 +543,6 @@ export class BlockManager {
             if (this.data.currentTime < this.data.serverEndTime) {
                 this.data.currentTime = Math.min(this.data.serverEndTime, this.data.currentTime + deltaMs);
             }
-
-            // In 2-second highlight mode, expire blocks after 2 seconds
-            if (this.data.highlightOnly !== false && this.activeBlocks.size > 0) {
-                let now = this.data.currentTime;
-                let windowMs = this.highlightDurationMs || 2000;
-                let hasExpired = false;
-                for (let b of this.activeBlocks.values()) {
-                    if (now - b.t > windowMs) {
-                        hasExpired = true;
-                        break;
-                    }
-                }
-                if (hasExpired) {
-                    this.rebuildActiveBlocks(now);
-                }
-            }
-        }
-    }
-
-    toggleHighlightOnly() {
-        this.data.highlightOnly = !this.data.highlightOnly;
-        this.rebuildActiveBlocks(this.data.currentTime);
-        if (this.mapViewer) {
-            this.mapViewer.redraw();
         }
     }
 
@@ -607,13 +561,17 @@ export class BlockManager {
     }
 
     getDateFilterBounds() {
+        let firstEventTime = this.eventsList.length > 0 ? this.eventsList[0].t : this.data.serverStartTime;
+        let globalStart = Math.min(this.data.serverStartTime, firstEventTime - 5000);
+        let globalEnd = Math.max(Date.now(), this.data.serverEndTime);
+
         let startOfToday = new Date();
         startOfToday.setHours(0, 0, 0, 0);
 
         if (this.data.dateFilterMode === "today") {
             return {
-                start: Math.max(startOfToday.getTime(), this.data.serverStartTime),
-                end: Math.max(Date.now(), this.data.serverEndTime)
+                start: Math.min(startOfToday.getTime(), firstEventTime - 1000),
+                end: globalEnd
             };
         } else if (this.data.dateFilterMode === "yesterday") {
             let startOfYesterday = new Date(startOfToday.getTime() - 86400000);
@@ -630,8 +588,8 @@ export class BlockManager {
         }
 
         return {
-            start: this.data.serverStartTime,
-            end: this.data.serverEndTime
+            start: globalStart,
+            end: globalEnd
         };
     }
 
