@@ -194,13 +194,19 @@ export class BlockManager {
             renderedBlocks: 0,
             recentPlacedCount: 0,
             autoFollow: false,
+            highlightOnly: true,
             selectedPlayer: "",
             playersList: [],
+            dateFilterMode: "all",
+            selectedDate: "",
+            availableDates: [],
             latestPlayer: null,
             latestBlock: null,
             isSyncing: false,
             syncStatusText: ""
         });
+
+        this.highlightDurationMs = 2000;
 
         // Event records storage
         this.eventsList = [];
@@ -382,6 +388,7 @@ export class BlockManager {
         }
 
         this.data.totalEvents = this.eventsList.length;
+        this.updateAvailableDates();
 
         // If initial load or in real-time mode, keep cursor at latest and rebuild
         if (isInitial || (!this.data.isPlaying && this.data.progress >= 0.99)) {
@@ -416,9 +423,19 @@ export class BlockManager {
         this.activeBlocks.clear();
         let targetTime = upToTime !== undefined ? upToTime : this.data.currentTime;
         let playerFilter = this.data.selectedPlayer;
+        let isHighlightOnly = this.data.highlightOnly !== false;
+        let bounds = this.getDateFilterBounds();
+        let minTime = bounds.start;
+
+        if (isHighlightOnly) {
+            let speed = this.data.isPlaying ? (this.data.speed || 1) : 1;
+            let windowMs = (this.highlightDurationMs || 2000) * speed;
+            minTime = Math.max(minTime, targetTime - windowMs);
+        }
 
         for (let evt of this.eventsList) {
             if (evt.t > targetTime) continue; // Do not abort early, safely continue
+            if (isHighlightOnly && evt.t < minTime) continue; // Only show blocks within 2-second window
             if (playerFilter && evt.p !== playerFilter) continue;
             let key = `${evt.x},${evt.y},${evt.z}`;
             if (evt.a === "place") {
@@ -432,7 +449,20 @@ export class BlockManager {
                     t: evt.t
                 });
             } else if (evt.a === "break") {
-                this.activeBlocks.delete(key);
+                if (isHighlightOnly) {
+                    this.activeBlocks.set(key, {
+                        x: evt.x,
+                        y: evt.y,
+                        z: evt.z,
+                        color: 0xff3b30, // Red highlight for broken block
+                        b: evt.b,
+                        p: evt.p,
+                        t: evt.t,
+                        isBreak: true
+                    });
+                } else {
+                    this.activeBlocks.delete(key);
+                }
             }
         }
 
@@ -490,12 +520,12 @@ export class BlockManager {
     onFrame(deltaMs) {
         let deltaSec = deltaMs / 1000;
 
-        // Update real-time pulses
+        // Update real-time pulses (2-second lifetime)
         if (this.pulses.length > 0) {
             for (let i = this.pulses.length - 1; i >= 0; i--) {
                 let p = this.pulses[i];
-                p.life -= deltaSec * 0.8;
-                p.scale += deltaSec * 0.2;
+                p.life -= deltaSec * 0.5; // 2 seconds total pulse duration
+                p.scale += deltaSec * 0.15;
                 p.mesh.scale.set(p.scale, p.scale, p.scale);
                 p.mesh.material.opacity = Math.max(0, p.life);
 
@@ -511,17 +541,18 @@ export class BlockManager {
 
         // Timelapse playback
         if (this.data.isPlaying) {
-            let totalSpan = Math.max(1000, this.data.serverEndTime - this.data.serverStartTime);
+            let bounds = this.getDateFilterBounds();
+            let totalSpan = Math.max(1000, bounds.end - bounds.start);
             // Speed factor: 1x = real-time, 10x = 10x faster
             let advanceMs = deltaMs * this.data.speed;
             this.data.currentTime += advanceMs;
 
-            if (this.data.currentTime >= this.data.serverEndTime) {
-                this.data.currentTime = this.data.serverEndTime;
+            if (this.data.currentTime >= bounds.end) {
+                this.data.currentTime = bounds.end;
                 this.data.isPlaying = false;
                 this.data.progress = 1.0;
             } else {
-                let currentSpan = this.data.currentTime - this.data.serverStartTime;
+                let currentSpan = this.data.currentTime - bounds.start;
                 this.data.progress = Math.min(1.0, Math.max(0.0, currentSpan / totalSpan));
             }
 
@@ -534,6 +565,30 @@ export class BlockManager {
             if (this.data.currentTime < this.data.serverEndTime) {
                 this.data.currentTime = Math.min(this.data.serverEndTime, this.data.currentTime + deltaMs);
             }
+
+            // In 2-second highlight mode, expire blocks after 2 seconds
+            if (this.data.highlightOnly !== false && this.activeBlocks.size > 0) {
+                let now = this.data.currentTime;
+                let windowMs = this.highlightDurationMs || 2000;
+                let hasExpired = false;
+                for (let b of this.activeBlocks.values()) {
+                    if (now - b.t > windowMs) {
+                        hasExpired = true;
+                        break;
+                    }
+                }
+                if (hasExpired) {
+                    this.rebuildActiveBlocks(now);
+                }
+            }
+        }
+    }
+
+    toggleHighlightOnly() {
+        this.data.highlightOnly = !this.data.highlightOnly;
+        this.rebuildActiveBlocks(this.data.currentTime);
+        if (this.mapViewer) {
+            this.mapViewer.redraw();
         }
     }
 
@@ -545,10 +600,59 @@ export class BlockManager {
         }
     }
 
+    setDateFilter(mode, dateStr = "") {
+        this.data.dateFilterMode = mode;
+        this.data.selectedDate = dateStr;
+        this.seek(1.0);
+    }
+
+    getDateFilterBounds() {
+        let startOfToday = new Date();
+        startOfToday.setHours(0, 0, 0, 0);
+
+        if (this.data.dateFilterMode === "today") {
+            return {
+                start: Math.max(startOfToday.getTime(), this.data.serverStartTime),
+                end: Math.max(Date.now(), this.data.serverEndTime)
+            };
+        } else if (this.data.dateFilterMode === "yesterday") {
+            let startOfYesterday = new Date(startOfToday.getTime() - 86400000);
+            let endOfYesterday = new Date(startOfToday.getTime() - 1);
+            return {
+                start: startOfYesterday.getTime(),
+                end: endOfYesterday.getTime()
+            };
+        } else if (this.data.dateFilterMode === "date" && this.data.selectedDate) {
+            let parts = this.data.selectedDate.split("-").map(Number);
+            let s = new Date(parts[0], parts[1] - 1, parts[2], 0, 0, 0, 0).getTime();
+            let e = new Date(parts[0], parts[1] - 1, parts[2], 23, 59, 59, 999).getTime();
+            return { start: s, end: e };
+        }
+
+        return {
+            start: this.data.serverStartTime,
+            end: this.data.serverEndTime
+        };
+    }
+
+    updateAvailableDates() {
+        let dates = new Set();
+        for (let evt of this.eventsList) {
+            if (!evt.t) continue;
+            let d = new Date(evt.t);
+            let y = d.getFullYear();
+            let m = String(d.getMonth() + 1).padStart(2, "0");
+            let day = String(d.getDate()).padStart(2, "0");
+            dates.add(`${y}-${m}-${day}`);
+        }
+        this.data.availableDates = Array.from(dates).sort().reverse();
+    }
+
     seek(progress) {
         this.data.progress = Math.max(0.0, Math.min(1.0, progress));
-        let totalSpan = Math.max(1000, this.data.serverEndTime - this.data.serverStartTime);
-        this.data.currentTime = this.data.serverStartTime + totalSpan * this.data.progress;
+        let bounds = this.getDateFilterBounds();
+        let totalSpan = Math.max(1000, bounds.end - bounds.start);
+        this.data.currentTime = bounds.start + totalSpan * this.data.progress;
         this.rebuildActiveBlocks(this.data.currentTime);
         if (this.mapViewer) {
             this.mapViewer.redraw();

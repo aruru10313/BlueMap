@@ -56,6 +56,52 @@
               </div>
             </div>
           </div>
+
+          <!-- Inline compact date selector chip -->
+          <div class="date-chip" :class="{'active': blockState.dateFilterMode !== 'all', 'open': dateDropdownOpen}" @click.stop="toggleDateDropdown" title="날짜별 타임랩스 필터">
+            <span class="chip-icon">📅</span>
+            <span class="chip-label">{{ dateLabel }}</span>
+            <span class="chip-arrow" :class="{'rotated': dateDropdownOpen}">▾</span>
+
+            <!-- Custom Date Dropdown Menu -->
+            <div v-if="dateDropdownOpen" class="date-dropdown-menu" @click.stop>
+              <div
+                  class="dropdown-item"
+                  :class="{'selected': blockState.dateFilterMode === 'all'}"
+                  @click="selectDateFilter('all')"
+              >
+                <span class="item-name">🌐 전체 기록</span>
+                <span v-if="blockState.dateFilterMode === 'all'" class="check">✓</span>
+              </div>
+              <div
+                  class="dropdown-item"
+                  :class="{'selected': blockState.dateFilterMode === 'today'}"
+                  @click="selectDateFilter('today')"
+              >
+                <span class="item-name">☀️ 오늘</span>
+                <span v-if="blockState.dateFilterMode === 'today'" class="check">✓</span>
+              </div>
+              <div
+                  class="dropdown-item"
+                  :class="{'selected': blockState.dateFilterMode === 'yesterday'}"
+                  @click="selectDateFilter('yesterday')"
+              >
+                <span class="item-name">🌙 어제</span>
+                <span v-if="blockState.dateFilterMode === 'yesterday'" class="check">✓</span>
+              </div>
+              <div v-if="blockState.availableDates && blockState.availableDates.length > 0" class="dropdown-divider"></div>
+              <div
+                  v-for="d in (blockState.availableDates || [])"
+                  :key="d"
+                  class="dropdown-item"
+                  :class="{'selected': blockState.dateFilterMode === 'date' && blockState.selectedDate === d}"
+                  @click="selectDateFilter('date', d)"
+              >
+                <span class="item-name">📅 {{ formatDateLabel(d) }}</span>
+                <span v-if="blockState.dateFilterMode === 'date' && blockState.selectedDate === d" class="check">✓</span>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div class="header-right">
@@ -74,7 +120,7 @@
 
       <!-- Row 2: Scrubber Timeline Slider -->
       <div class="slider-row">
-        <span class="time-label start" title="시작 시점">00:00</span>
+        <span class="time-label start" title="시작 시점">{{ startTimeLabel }}</span>
         <div class="slider-wrapper">
           <input
               type="range"
@@ -89,7 +135,7 @@
           <div class="slider-fill" :style="{width: (blockState.progress * 100) + '%'}"></div>
         </div>
         <span class="time-label current" title="현재 시점">
-          {{ formatTime(blockState.currentTime - blockState.serverStartTime) }}
+          {{ currentTimeLabel }}
         </span>
       </div>
 
@@ -108,6 +154,14 @@
               title="설치 위치 자동 시점 추적"
           >
             🎯 추적
+          </button>
+          <button
+              class="ctrl-btn highlight-btn"
+              :class="{'active': blockState.highlightOnly}"
+              @click="toggleHighlight"
+              :title="blockState.highlightOnly ? '2초 강조 모드: 블록이 2초간 보이고 사라집니다' : '누적 모드: 설치된 블록이 사라지지 않고 유지됩니다'"
+          >
+            {{ blockState.highlightOnly ? '✨ 2초 강조' : '🏗 누적' }}
           </button>
         </div>
 
@@ -133,7 +187,8 @@ export default {
   name: "TimelapseBar",
   data() {
     return {
-      userDropdownOpen: false
+      userDropdownOpen: false,
+      dateDropdownOpen: false
     };
   },
   mounted() {
@@ -151,12 +206,34 @@ export default {
     },
     blockState() {
       return this.appState && this.appState.blockState ? this.appState.blockState : (this.blockManager ? this.blockManager.data : null);
+    },
+    dateLabel() {
+      if (!this.blockState) return "전체 기록";
+      if (this.blockState.dateFilterMode === "today") return "오늘";
+      if (this.blockState.dateFilterMode === "yesterday") return "어제";
+      if (this.blockState.dateFilterMode === "date" && this.blockState.selectedDate) {
+        return this.formatDateLabel(this.blockState.selectedDate);
+      }
+      return "전체 기록";
+    },
+    startTimeLabel() {
+      return "00:00";
+    },
+    currentTimeLabel() {
+      if (!this.blockState) return "00:00";
+      if (this.blockState.dateFilterMode === "today" || this.blockState.dateFilterMode === "yesterday" || this.blockState.dateFilterMode === "date") {
+        return this.formatClock(this.blockState.currentTime);
+      }
+      return this.formatTime(this.blockState.currentTime - this.blockState.serverStartTime);
     }
   },
   methods: {
     handleDocumentClick(e) {
       if (this.userDropdownOpen && !this.$el?.querySelector(".user-chip")?.contains(e.target)) {
         this.userDropdownOpen = false;
+      }
+      if (this.dateDropdownOpen && !this.$el?.querySelector(".date-chip")?.contains(e.target)) {
+        this.dateDropdownOpen = false;
       }
     },
     toggleUserDropdown() {
@@ -167,6 +244,36 @@ export default {
         this.blockManager.setPlayerFilter(player);
       }
       this.userDropdownOpen = false;
+    },
+    toggleDateDropdown() {
+      this.dateDropdownOpen = !this.dateDropdownOpen;
+    },
+    selectDateFilter(mode, dateStr = "") {
+      if (this.blockManager) {
+        this.blockManager.setDateFilter(mode, dateStr);
+      }
+      this.dateDropdownOpen = false;
+    },
+    toggleHighlight() {
+      if (this.blockManager) {
+        this.blockManager.toggleHighlightOnly();
+      }
+    },
+    formatDateLabel(dateStr) {
+      if (!dateStr) return "";
+      let parts = dateStr.split("-");
+      if (parts.length === 3) {
+        return `${Number(parts[1])}월 ${Number(parts[2])}일`;
+      }
+      return dateStr;
+    },
+    formatClock(ts) {
+      if (!ts) return "00:00:00";
+      let d = new Date(ts);
+      let h = String(d.getHours()).padStart(2, "0");
+      let m = String(d.getMinutes()).padStart(2, "0");
+      let s = String(d.getSeconds()).padStart(2, "0");
+      return `${h}:${m}:${s}`;
     },
     toggleOpen() {
       if (this.blockManager) {
@@ -520,6 +627,117 @@ export default {
             }
           }
         }
+
+        .date-chip {
+          position: relative;
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          background: rgba(255, 255, 255, 0.08);
+          border: 1px solid rgba(255, 255, 255, 0.18);
+          border-radius: 14px;
+          padding: 3px 8px;
+          margin-left: 2px;
+          cursor: pointer;
+          transition: all 0.15s ease;
+          user-select: none;
+
+          &:hover, &.open {
+            background: rgba(255, 255, 255, 0.14);
+            border-color: rgba(0, 229, 255, 0.5);
+          }
+
+          &.active {
+            border-color: #00e5ff;
+            background: rgba(0, 229, 255, 0.14);
+          }
+
+          .chip-icon {
+            font-size: 0.75rem;
+          }
+
+          .chip-label {
+            color: #00e5ff;
+            font-size: 0.74rem;
+            font-weight: 600;
+            max-width: 90px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }
+
+          .chip-arrow {
+            font-size: 0.65rem;
+            color: rgba(255, 255, 255, 0.6);
+            transition: transform 0.15s ease;
+            &.rotated {
+              transform: rotate(180deg);
+            }
+          }
+
+          .date-dropdown-menu {
+            position: absolute;
+            bottom: calc(100% + 8px);
+            left: 0;
+            min-width: 140px;
+            max-width: 200px;
+            max-height: 200px;
+            overflow-y: auto;
+            background: rgba(18, 22, 34, 0.96);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
+            padding: 4px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.75);
+            z-index: 10010;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+
+            .dropdown-divider {
+              height: 1px;
+              background: rgba(255, 255, 255, 0.12);
+              margin: 3px 0;
+            }
+
+            .dropdown-item {
+              display: flex;
+              align-items: center;
+              justify-content: space-between;
+              padding: 6px 10px;
+              border-radius: 8px;
+              font-size: 0.76rem;
+              font-weight: 500;
+              color: #e2e8f0;
+              cursor: pointer;
+              transition: background 0.15s ease;
+
+              &:hover {
+                background: rgba(255, 255, 255, 0.1);
+                color: #fff;
+              }
+
+              &.selected {
+                color: #00e5ff;
+                font-weight: 700;
+                background: rgba(0, 229, 255, 0.15);
+              }
+
+              .item-name {
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+              }
+
+              .check {
+                font-size: 0.7rem;
+                margin-left: 6px;
+                color: #00e5ff;
+              }
+            }
+          }
+        }
       }
 
       .header-right {
@@ -753,6 +971,19 @@ export default {
             background: #ff9800;
             color: #000;
             font-weight: 700;
+          }
+        }
+
+        &.highlight-btn {
+          font-size: 0.76rem;
+          padding: 6px 9px;
+
+          &.active {
+            background: rgba(0, 229, 255, 0.2);
+            border-color: #00e5ff;
+            color: #00e5ff;
+            font-weight: 700;
+            box-shadow: 0 0 10px rgba(0, 229, 255, 0.25);
           }
         }
       }
