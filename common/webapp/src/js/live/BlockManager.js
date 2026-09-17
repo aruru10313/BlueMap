@@ -194,7 +194,9 @@ export class BlockManager {
             recentPlacedCount: 0,
             autoFollow: false,
             latestPlayer: null,
-            latestBlock: null
+            latestBlock: null,
+            isSyncing: false,
+            syncStatusText: ""
         });
 
         // Event records storage
@@ -344,6 +346,10 @@ export class BlockManager {
                 this.focusOnBlock(lastEvt.x, lastEvt.y, lastEvt.z);
             }
         }
+
+        if (this.mapViewer) {
+            this.mapViewer.redraw();
+        }
     }
 
     rebuildActiveBlocks(upToTime) {
@@ -396,6 +402,9 @@ export class BlockManager {
         }
 
         this.data.renderedBlocks = count;
+        if (this.mapViewer) {
+            this.mapViewer.redraw();
+        }
     }
 
     spawnPulse(x, y, z) {
@@ -432,6 +441,9 @@ export class BlockManager {
                     this.pulses.splice(i, 1);
                 }
             }
+            if (this.mapViewer) {
+                this.mapViewer.redraw();
+            }
         }
 
         // Timelapse playback
@@ -451,6 +463,9 @@ export class BlockManager {
             }
 
             this.rebuildActiveBlocks(this.data.currentTime);
+            if (this.mapViewer) {
+                this.mapViewer.redraw();
+            }
         }
     }
 
@@ -459,6 +474,55 @@ export class BlockManager {
         let totalSpan = Math.max(1000, this.data.serverEndTime - this.data.serverStartTime);
         this.data.currentTime = this.data.serverStartTime + totalSpan * this.data.progress;
         this.rebuildActiveBlocks(this.data.currentTime);
+        if (this.mapViewer) {
+            this.mapViewer.redraw();
+        }
+    }
+
+    async syncMap() {
+        if (this.data.isSyncing) return;
+        this.data.isSyncing = true;
+        this.data.syncStatusText = "동기화 중...";
+
+        try {
+            // 1. Clear tile cache and reload loaded map area
+            if (this.mapViewer) {
+                this.mapViewer.clearTileCache();
+                let center = this.mapViewer.data.loadedCenter;
+                if (center && this.mapViewer.map) {
+                    this.mapViewer.loadMapArea(
+                        center.x,
+                        center.y,
+                        this.mapViewer.data.loadedHiresViewDistance,
+                        this.mapViewer.data.loadedLowresViewDistance
+                    );
+                }
+                this.mapViewer.redraw();
+            }
+
+            // 2. Fetch full block history
+            await this.fetchFullHistory();
+
+            // 3. Update normal markers (territory claims, etc.)
+            if (window.bluemap && window.bluemap.markerFileManager) {
+                await window.bluemap.markerFileManager.update();
+            }
+
+            // 4. Trigger redraw
+            if (this.mapViewer) {
+                this.mapViewer.redraw();
+            }
+
+            this.data.syncStatusText = "동기화 완료!";
+        } catch (e) {
+            console.error("Map sync error:", e);
+            this.data.syncStatusText = "동기화 실패";
+        } finally {
+            setTimeout(() => {
+                this.data.isSyncing = false;
+                this.data.syncStatusText = "";
+            }, 1200);
+        }
     }
 
     play() {
