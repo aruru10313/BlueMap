@@ -178,7 +178,7 @@ export class BlockManager {
 
         this.data = reactive({
             active: true,
-            timelapseOpen: false,
+            timelapseOpen: true,
             isPlaying: false,
             speed: 5,
             progress: 1.0,

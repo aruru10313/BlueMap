@@ -35,12 +35,15 @@ import de.bluecolored.bluemap.core.util.Key;
 import de.bluecolored.bluemap.core.world.World;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.Random;
+
 public class BlocksRequestHandler implements HttpRequestHandler {
 
     private final BlockTracker blockTracker;
     private final Server server;
     private final World world;
     private transient @Nullable ServerWorld serverWorld;
+    private final Random random = new Random();
 
     public BlocksRequestHandler(BlockTracker blockTracker, Server server, World world) {
         this.blockTracker = blockTracker;
@@ -54,6 +57,31 @@ public class BlocksRequestHandler implements HttpRequestHandler {
             serverWorld = server.getServerWorld(world).orElse(null);
         }
         Key dimension = serverWorld != null ? serverWorld.getDimension() : null;
+
+        String simStr = request.getGETParams().get("sim");
+        if (simStr != null && dimension != null) {
+            int count = 10;
+            try {
+                count = Math.max(1, Math.min(500, Integer.parseInt(simStr)));
+            } catch (NumberFormatException ignored) {}
+
+            String[] blocks = {
+                "minecraft:diamond_block", "minecraft:gold_block", "minecraft:emerald_block",
+                "minecraft:obsidian", "minecraft:oak_planks", "minecraft:stone_bricks",
+                "minecraft:glass", "minecraft:redstone_block", "minecraft:lapis_block",
+                "minecraft:iron_block", "minecraft:copper_block"
+            };
+            String[] players = {"Steve", "Alex", "Admin", "Hero", "Builder"};
+
+            for (int i = 0; i < count; i++) {
+                int x = (random.nextInt(32) - 16);
+                int z = (random.nextInt(32) - 16);
+                int y = 64 + (i % 12);
+                String b = blocks[random.nextInt(blocks.length)];
+                String p = players[random.nextInt(players.length)];
+                blockTracker.addBlock(dimension, x, y, z, b, p, true);
+            }
+        }
 
         long since = 0;
         String sinceStr = request.getGETParams().get("since");

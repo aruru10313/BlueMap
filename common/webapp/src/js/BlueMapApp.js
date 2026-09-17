@@ -106,7 +106,9 @@ export class BlueMapApp {
             screenshot: {
                 clipboard: true
             },
-            debug: false
+            debug: false,
+            blockManager: null,
+            blockState: null
         });
 
         // init
@@ -256,7 +258,12 @@ export class BlueMapApp {
 
         if (this.playerMarkerManager) this.playerMarkerManager.dispose();
         if (this.markerFileManager) this.markerFileManager.dispose();
-        if (this.blockManager) this.blockManager.dispose();
+        if (this.blockManager) {
+            this.blockManager.dispose();
+            this.blockManager = null;
+            this.appState.blockManager = null;
+            this.appState.blockState = null;
+        }
 
         await this.mapViewer.switchMap(map)
 
@@ -443,8 +450,12 @@ export class BlueMapApp {
     }
 
     initBlockManager() {
-        if (this.blockManager)
+        if (this.blockManager) {
             this.blockManager.dispose();
+            this.blockManager = null;
+            this.appState.blockManager = null;
+            this.appState.blockState = null;
+        }
 
         const map = this.mapViewer.map;
         if (!map) return;
@@ -455,6 +466,8 @@ export class BlueMapApp {
             this.events,
             this.mapViewer
         );
+        this.appState.blockManager = this.blockManager;
+        this.appState.blockState = this.blockManager.data;
     }
 
     updateControlsSettings() {
