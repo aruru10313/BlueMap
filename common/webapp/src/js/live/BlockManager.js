@@ -31,7 +31,7 @@ import {
     LineBasicMaterial,
     LineSegments,
     Matrix4,
-    MeshLambertMaterial,
+    MeshBasicMaterial,
     WireframeGeometry
 } from "three";
 import {reactive} from "vue";
@@ -117,6 +117,10 @@ const BLOCK_COLORS = {
     "minecraft:gold_block": 0xf6d03d,
     "minecraft:iron_block": 0xd8d8d8,
     "minecraft:diamond_block": 0x62e3dd,
+    "minecraft:emerald_block": 0x17dd62,
+    "minecraft:lapis_block": 0x1e49b8,
+    "minecraft:copper_block": 0xc0694f,
+    "minecraft:redstone_block": 0xdb1d1d,
     "minecraft:netherite_block": 0x443a3b,
     "minecraft:bricks": 0x966153,
     "minecraft:bookshelf": 0x745634,
@@ -130,12 +134,12 @@ const BLOCK_COLORS = {
     "minecraft:netherrack": 0x652828,
     "minecraft:soul_sand": 0x514035,
     "minecraft:soul_soil": 0x4b3b31,
-    "minecraft:glowstone": 0x8f7647,
+    "minecraft:glowstone": 0xffbc5e,
     "minecraft:end_stone": 0xddde9d,
     "minecraft:purpur_block": 0xa87ca8,
     "minecraft:prismarine": 0x639c97,
     "minecraft:dark_prismarine": 0x335b4b,
-    "minecraft:sea_lantern": 0xabc8bf,
+    "minecraft:sea_lantern": 0xa3ded7,
     "minecraft:terracotta": 0x985e44,
     "minecraft:white_concrete": 0xcfcfd1,
     "minecraft:red_concrete": 0x8e2020,
@@ -205,10 +209,8 @@ export class BlockManager {
         // InstancedMesh for high performance (Single draw call)
         this.maxInstances = 50000;
         const boxGeometry = new BoxGeometry(1.002, 1.002, 1.002);
-        const boxMaterial = new MeshLambertMaterial({
-            color: 0xffffff,
-            roughness: 0.7,
-            metalness: 0.1
+        const boxMaterial = new MeshBasicMaterial({
+            color: 0xffffff
         });
         this.instancedMesh = new InstancedMesh(boxGeometry, boxMaterial, this.maxInstances);
         this.instancedMesh.instanceMatrix.setUsage(DynamicDrawUsage);
