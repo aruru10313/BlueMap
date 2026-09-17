@@ -34,6 +34,7 @@ import java.io.BufferedWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.util.*;
 import java.util.concurrent.*;
@@ -42,6 +43,7 @@ import java.util.concurrent.atomic.AtomicLong;
 public class BlockTracker implements AutoCloseable {
 
     private static final int MAX_EVENTS_PER_WORLD = 100_000;
+    private static final int MAX_PERSIST_QUEUE_SIZE = 50_000;
 
     private volatile long serverStartTime;
     private final AtomicLong seqGenerator;
@@ -150,8 +152,12 @@ public class BlockTracker implements AutoCloseable {
             List<BlockRecord> list = e.getValue();
             if (list.isEmpty()) continue;
 
-            String safeName = dim.getFormatted().replace(':', '_') + ".jsonl";
-            Path file = storageDir.resolve(safeName);
+            String safeName = dim.getFormatted().replaceAll("[^a-zA-Z0-9._-]", "_") + ".jsonl";
+            Path file = storageDir.resolve(safeName).normalize();
+            if (!file.startsWith(storageDir.normalize())) {
+                Logger.global.logWarning("Blocked potential path traversal in dimension name: " + safeName);
+                continue;
+            }
 
             try (BufferedWriter writer = Files.newBufferedWriter(file, StandardCharsets.UTF_8,
                     StandardOpenOption.CREATE, StandardOpenOption.APPEND)) {
@@ -173,11 +179,19 @@ public class BlockTracker implements AutoCloseable {
     private void saveMetadata() {
         if (storageDir == null) return;
         Path meta = storageDir.resolve("metadata.json");
+        Path tmp = storageDir.resolve("metadata.json.tmp");
         String content = "{\"serverStartTime\":" + serverStartTime + ",\"latestSeq\":" + seqGenerator.get() + "}";
         try {
-            Files.writeString(meta, content, StandardCharsets.UTF_8,
+            Files.writeString(tmp, content, StandardCharsets.UTF_8,
                     StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
-        } catch (Exception ignored) {}
+            try {
+                Files.move(tmp, meta, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } catch (Exception fallback) {
+                Files.move(tmp, meta, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } catch (Exception ex) {
+            Logger.global.logWarning("Failed to atomic-write timelapse metadata: " + ex.getMessage());
+        }
     }
 
     public synchronized void flush() {
@@ -201,7 +215,10 @@ public class BlockTracker implements AutoCloseable {
         WorldBlockHistory history = worldHistories.computeIfAbsent(dimension, k -> new WorldBlockHistory());
         history.add(record);
 
-        // Queue for non-blocking asynchronous persistence
+        // Queue for non-blocking asynchronous persistence with bounded memory protection
+        if (persistQueue.size() >= MAX_PERSIST_QUEUE_SIZE) {
+            persistQueue.poll();
+        }
         persistQueue.add(new PersistEntry(dimension, record));
     }
 
