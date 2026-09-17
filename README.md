@@ -15,6 +15,11 @@ create **3D**-maps of your Minecraft worlds and display them in your browser
 
 <br>
 <br>
+## ⏱️ Real-Time Block Tracker & Chronological Timelapse
+이 포크 저장소(`feature/realtime-timelapse`)는 **실시간 블록 설치 감지** 및 브라우저에서 서버 시작부터 현재까지 건축 타임라인을 시간순으로 되돌려보는 **인터랙티브 타임랩스**를 지원합니다.
+자세한 기능 설명, API 명세, 모바일 UI 최적화 내용은 **[README_REALTIME_TIMELAPSE.md](README_REALTIME_TIMELAPSE.md)**를 참조하세요.
+
+---
 
 ## What is BlueMap
 BlueMap is a program that reads your Minecraft world files and generates not only a map, but also 3D-models of the whole surface.
