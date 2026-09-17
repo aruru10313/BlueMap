@@ -88,13 +88,37 @@ public class ForgeEventForwarder {
         String player = null;
         if (evt.getEntity() instanceof Player p) {
             player = p.getGameProfile().getName();
+        } else if (evt.getEntity() != null) {
+            player = evt.getEntity().getDisplayName().getString();
+        } else {
+            Player nearest = level.getNearestPlayer(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5, 8.0, false);
+            if (nearest != null) {
+                player = nearest.getGameProfile().getName();
+            }
         }
+
         for (ServerEventListener listener : eventListeners) {
             listener.onBlockChange(world, pos.getX(), pos.getY(), pos.getZ(), blockId, player, true);
         }
 
+        // Handle multi-place events (e.g. Create large water wheel, multi-tanks, tracks, beds)
+        if (evt instanceof BlockEvent.EntityMultiPlaceEvent multiEvt) {
+            for (var snapshot : multiEvt.getReplacedBlockSnapshots()) {
+                BlockPos snapPos = snapshot.getPos();
+                if (!snapPos.equals(pos)) {
+                    String snapBlockId = BuiltInRegistries.BLOCK.getKey(snapshot.getCurrentState().getBlock()).toString();
+                    if ("minecraft:air".equals(snapBlockId)) {
+                        snapBlockId = BuiltInRegistries.BLOCK.getKey(evt.getPlacedBlock().getBlock()).toString();
+                    }
+                    for (ServerEventListener listener : eventListeners) {
+                        listener.onBlockChange(world, snapPos.getX(), snapPos.getY(), snapPos.getZ(), snapBlockId, player, true);
+                    }
+                }
+            }
+        }
+
         // Check if placed block is a sign, delay read text after player closes GUI
-        if (evt.getPlacedBlock().getBlock() instanceof net.minecraft.world.level.block.SignBlock) {
+        if (evt.getPlacedBlock().getBlock() instanceof net.minecraft.world.level.block.SignBlock || blockId.contains("sign")) {
             final String finalPlayer = player;
             new java.util.Timer().schedule(new java.util.TimerTask() {
                 @Override
@@ -165,16 +189,27 @@ public class ForgeEventForwarder {
         ServerWorld world = forgeMod.getServerWorld(level);
         if (world == null) return;
         BlockPos pos = evt.getPos();
+        final String prevBlockId = BuiltInRegistries.BLOCK.getKey(level.getBlockState(pos).getBlock()).toString();
+        final String player = evt.getEntity().getGameProfile().getName();
+
         if (level.getBlockEntity(pos) instanceof net.minecraft.world.level.block.entity.SignBlockEntity sign) {
             String text = extractSignText(sign);
             if (text != null) {
-                String blockId = BuiltInRegistries.BLOCK.getKey(level.getBlockState(pos).getBlock()).toString();
-                String player = evt.getEntity().getGameProfile().getName();
                 for (ServerEventListener listener : eventListeners) {
-                    listener.onBlockChange(world, pos.getX(), pos.getY(), pos.getZ(), blockId, player, true, text);
+                    listener.onBlockChange(world, pos.getX(), pos.getY(), pos.getZ(), prevBlockId, player, true, text);
                 }
             }
         }
+
+        // Detect Create mod block conversions (e.g. casing applied to shafts/cogwheels, wrench modifications)
+        level.getServer().execute(() -> {
+            String newBlockId = BuiltInRegistries.BLOCK.getKey(level.getBlockState(pos).getBlock()).toString();
+            if (!newBlockId.equals(prevBlockId)) {
+                for (ServerEventListener listener : eventListeners) {
+                    listener.onBlockChange(world, pos.getX(), pos.getY(), pos.getZ(), newBlockId, player, true);
+                }
+            }
+        });
     }
 
     private String extractSignText(net.minecraft.world.level.block.entity.SignBlockEntity sign) {

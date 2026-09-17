@@ -622,27 +622,24 @@ export class BlockManager {
             }
         }
 
-        // 2. Check if terrain hit coordinates match any recorded block in activeBlocks
+        // 2. Check if terrain hit coordinates match any recorded block in activeBlocks or history
         if (!foundBlock) {
             for (let hit of intersections) {
                 if (!hit.point) continue;
                 let normal = hit.face ? hit.face.normal : new Vector3();
-                let bx = Math.floor(hit.point.x - normal.x * 0.1);
-                let by = Math.floor(hit.point.y - normal.y * 0.1);
-                let bz = Math.floor(hit.point.z - normal.z * 0.1);
-                let info = this.getBlockInfo(bx, by, bz);
-                if (info) {
-                    foundBlock = info;
-                    break;
+                let candidates = [
+                    { x: Math.floor(hit.point.x - normal.x * 0.2), y: Math.floor(hit.point.y - normal.y * 0.2), z: Math.floor(hit.point.z - normal.z * 0.2) },
+                    { x: Math.floor(hit.point.x + normal.x * 0.1), y: Math.floor(hit.point.y + normal.y * 0.1), z: Math.floor(hit.point.z + normal.z * 0.1) },
+                    { x: Math.floor(hit.point.x), y: Math.floor(hit.point.y), z: Math.floor(hit.point.z) }
+                ];
+                for (let c of candidates) {
+                    let info = this.getBlockInfo(c.x, c.y, c.z);
+                    if (info) {
+                        foundBlock = info;
+                        break;
+                    }
                 }
-                bx = Math.floor(hit.point.x);
-                by = Math.floor(hit.point.y);
-                bz = Math.floor(hit.point.z);
-                info = this.getBlockInfo(bx, by, bz);
-                if (info) {
-                    foundBlock = info;
-                    break;
-                }
+                if (foundBlock) break;
             }
         }
 
@@ -662,6 +659,7 @@ export class BlockManager {
         let isPlace = info.action === "place";
         let actionClass = isPlace ? "place" : "break";
         let actionLabel = isPlace ? "🧱 설치" : "⛏️ 파괴";
+        let displayBlock = this.formatBlockName(info.rawBlock || info.block);
         let signHtml = info.message ? `
             <div class="bm-tooltip-sign">📜 "${this.escapeHtml(info.message)}"</div>
         ` : "";
@@ -671,7 +669,7 @@ export class BlockManager {
                 <span class="bm-tooltip-badge ${actionClass}">${actionLabel}</span>
                 <span class="bm-tooltip-player">👤 <b>${this.escapeHtml(info.player)}</b></span>
             </div>
-            <div class="bm-tooltip-block">${this.escapeHtml(info.block)}</div>
+            <div class="bm-tooltip-block">${this.escapeHtml(displayBlock)}</div>
             <div class="bm-tooltip-meta">
                 <span>📍 ${info.x}, ${info.y}, ${info.z}</span>
                 ${timeStr ? `<span>🕒 ${timeStr}</span>` : ""}
@@ -816,19 +814,76 @@ export class BlockManager {
             }
         } else if (name === "crafting_table") {
             bottomPath = "minecraft:block/oak_planks";
+        } else if (name.includes("sign")) {
+            // Realistic Wood Planks texture for Minecraft & modded signs
+            let wood = "oak";
+            for (let w of ["spruce", "birch", "jungle", "acacia", "dark_oak", "mangrove", "cherry", "bamboo", "crimson", "warped"]) {
+                if (name.includes(w)) {
+                    wood = w;
+                    break;
+                }
+            }
+            let plankItem = this.getTextureItem(`minecraft:block/${wood}_planks`);
+            let signItem = this.getTextureItem(`minecraft:entity/signs/${wood}`);
+            let chosen = plankItem || signItem;
+            if (chosen) {
+                topItem = bottomItem = sideItem = chosen;
+            }
+        } else if (namespace === "create") {
+            // Create Mod smart block texture mappings
+            if (name === "shaft") {
+                let axis = this.getTextureItem("create:block/axis");
+                let axisTop = this.getTextureItem("create:block/axis_top");
+                topItem = bottomItem = axisTop || axis;
+                sideItem = axis;
+            } else if (name.includes("casing")) {
+                let casing = this.getTextureItem(`create:block/${name}`) ||
+                             this.getTextureItem(`create:block/${name.replace('_casing', '')}_casing`);
+                if (casing) topItem = bottomItem = sideItem = casing;
+            } else if (name.includes("water_wheel")) {
+                let wheel = this.getTextureItem("create:block/waterwheel_metal") ||
+                            this.getTextureItem("minecraft:block/oak_planks");
+                if (wheel) topItem = bottomItem = sideItem = wheel;
+            } else if (name === "steam_engine") {
+                let engine = this.getTextureItem("create:block/engine");
+                if (engine) topItem = bottomItem = sideItem = engine;
+            } else if (name.includes("speedometer") || name.includes("stressometer")) {
+                let gauge = this.getTextureItem("create:block/rotation_speed_controller");
+                if (gauge) topItem = bottomItem = sideItem = gauge;
+            } else if (name.includes("track")) {
+                let track = this.getTextureItem("create:item/track");
+                if (track) topItem = bottomItem = sideItem = track;
+            } else if (name === "placard") {
+                let placard = this.getTextureItem("create:block/placard");
+                if (placard) topItem = bottomItem = sideItem = placard;
+            }
         }
 
-        let topItem = this.getTextureItem(topPath) || this.getTextureItem(directPath);
-        let bottomItem = this.getTextureItem(bottomPath) || this.getTextureItem(directPath) || topItem;
-        let sideItem = this.getTextureItem(sidePath) || this.getTextureItem(directPath) || topItem;
+        if (!topItem) topItem = this.getTextureItem(topPath) || this.getTextureItem(directPath);
+        if (!bottomItem) bottomItem = this.getTextureItem(bottomPath) || this.getTextureItem(directPath) || topItem;
+        if (!sideItem) sideItem = this.getTextureItem(sidePath) || this.getTextureItem(directPath) || topItem;
 
-        // Fuzzy match
+        // Enhanced fuzzy matching
         if (!topItem && !sideItem && this.texturesMap) {
             let entries = this.texturesMap instanceof window.Map ? this.texturesMap.entries() : Object.entries(this.texturesMap);
+            
+            // 1. Exact or suffix match in same namespace
             for (let [path, item] of entries) {
+                if (namespace !== "minecraft" && !path.startsWith(namespace + ":")) continue;
                 if (path.includes(`:block/${name}`) || path.endsWith(`/${name}`)) {
                     topItem = bottomItem = sideItem = item;
                     break;
+                }
+            }
+
+            // 2. Loose match for Create mod or compound block names
+            if (!topItem) {
+                let simplifiedName = name.replace(/^(encased_|mechanical_|large_|small_)/, "");
+                for (let [path, item] of entries) {
+                    if (path.startsWith(namespace + ":block/") && (path.includes(simplifiedName) || path.includes(name))) {
+                        topItem = bottomItem = sideItem = item;
+                        break;
+                    }
                 }
             }
         }
