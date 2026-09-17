@@ -17,49 +17,46 @@
     </div>
 
     <!-- Main Expanded Control Panel -->
+    <!-- Main Expanded Control Panel -->
     <div v-else class="timelapse-panel">
-      <!-- Top info & actions bar -->
+      <!-- Row 1: Header + User Filter Chip + Status & Sync -->
       <div class="panel-header">
         <div class="header-left">
           <span class="icon">⏱</span>
           <span class="title">타임랩스</span>
           <span class="badge">{{ blockState.renderedBlocks }} / {{ blockState.totalEvents }}</span>
           <span v-if="blockState.syncStatusText" class="sync-status-badge">{{ blockState.syncStatusText }}</span>
+
+          <!-- Inline compact user selector chip -->
+          <div class="user-chip">
+            <span class="chip-icon">👤</span>
+            <select class="user-chip-select" :value="blockState.selectedPlayer" @change="onPlayerChange" title="유저별 타임랩스 필터">
+              <option value="">전체 유저</option>
+              <option v-for="player in blockState.playersList" :key="player" :value="player">
+                {{ player }}
+              </option>
+            </select>
+            <button v-if="blockState.selectedPlayer" class="chip-clear" @click="clearPlayerFilter" title="전체 유저로">✕</button>
+          </div>
         </div>
 
         <div class="header-right">
           <button class="sync-btn" :class="{'syncing': blockState.isSyncing}" @click="syncMap" title="맵 및 블록 즉시 동기화">
             <span class="sync-icon" :class="{'spinning': blockState.isSyncing}">🔄</span>
-            <span class="sync-text">동기화</span>
           </button>
 
-          <div class="status-indicator">
+          <button class="live-pill-btn" :class="{'active': blockState.progress >= 0.99 && !blockState.isPlaying}" @click="jumpEnd" title="실시간 시점으로 이동">
             <span class="live-dot" :class="{'pulsing': blockState.isPlaying || blockState.progress >= 0.99}"></span>
-            <span class="status-text">
-              {{ blockState.isPlaying ? '재생' : (blockState.progress >= 0.99 ? '실시간' : '일시정지') }}
-            </span>
-          </div>
+            <span class="live-text">{{ blockState.isPlaying ? '재생 중' : (blockState.progress >= 0.99 ? '실시간' : '일시정지') }}</span>
+          </button>
 
           <button class="close-btn" @click="toggleOpen" title="최소화">✕</button>
         </div>
       </div>
 
-      <!-- Player Filter Bar (Select specific user or view all) -->
-      <div class="player-filter-bar">
-        <span class="filter-icon">👤</span>
-        <span class="filter-label">유저:</span>
-        <select class="player-select" :value="blockState.selectedPlayer" @change="onPlayerChange">
-          <option value="">전체 유저 ({{ blockState.totalEvents }}개 블럭)</option>
-          <option v-for="player in blockState.playersList" :key="player" :value="player">
-            {{ player }}
-          </option>
-        </select>
-        <button v-if="blockState.selectedPlayer" class="clear-filter-btn" @click="clearPlayerFilter" title="전체 유저로 초기화">✕</button>
-      </div>
-
-      <!-- Scrubber Timeline Slider -->
+      <!-- Row 2: Scrubber Timeline Slider -->
       <div class="slider-row">
-        <span class="time-label start" title="서버 시작">00:00</span>
+        <span class="time-label start" title="시작 시점">00:00</span>
         <div class="slider-wrapper">
           <input
               type="range"
@@ -78,15 +75,13 @@
         </span>
       </div>
 
-      <!-- Control Buttons (Responsive Grid for Mobile) -->
+      <!-- Row 3: Playback Controls & Speed Segmented Control -->
       <div class="controls-row">
         <div class="main-action-group">
           <button class="ctrl-btn jump-btn" @click="jumpStart" title="처음으로">⏮</button>
-          <button class="ctrl-btn play-btn" @click="togglePlay" :title="blockState.isPlaying ? '일시정지' : '재생'">
-            {{ blockState.isPlaying ? '⏸ 정지' : '▶ 재생' }}
-          </button>
-          <button class="ctrl-btn live-btn" :class="{'active': blockState.progress >= 0.99 && !blockState.isPlaying}" @click="jumpEnd" title="실시간 시점으로">
-            <span class="live-dot-inline"></span> 실시간
+          <button class="ctrl-btn play-btn" :class="{'playing': blockState.isPlaying}" @click="togglePlay" :title="blockState.isPlaying ? '일시정지' : '재생'">
+            <span class="play-icon">{{ blockState.isPlaying ? '⏸' : '▶' }}</span>
+            <span class="play-label">{{ blockState.isPlaying ? '정지' : '재생' }}</span>
           </button>
           <button
               class="ctrl-btn follow-btn"
@@ -98,7 +93,7 @@
           </button>
         </div>
 
-        <!-- Speed options -->
+        <!-- Speed Segmented Control -->
         <div class="speed-group" title="재생 배속">
           <button
               v-for="s in [1, 2, 5, 10, 25]"
@@ -356,6 +351,58 @@ export default {
           padding: 2px 6px;
           border-radius: 6px;
         }
+
+        .user-chip {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          background: rgba(255, 255, 255, 0.08);
+          border: 1px solid rgba(255, 255, 255, 0.16);
+          border-radius: 14px;
+          padding: 2px 8px;
+          margin-left: 4px;
+
+          .chip-icon {
+            font-size: 0.75rem;
+          }
+
+          .user-chip-select {
+            background: transparent;
+            border: none;
+            color: #ffd54f;
+            font-size: 0.74rem;
+            font-weight: 600;
+            outline: none;
+            cursor: pointer;
+            padding: 0;
+
+            option {
+              background: #181b26;
+              color: #fff;
+              font-weight: normal;
+            }
+          }
+
+          .chip-clear {
+            background: rgba(255, 255, 255, 0.15);
+            border: none;
+            color: #f87171;
+            border-radius: 50%;
+            width: 14px;
+            height: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.65rem;
+            cursor: pointer;
+            padding: 0;
+            margin-left: 2px;
+
+            &:hover {
+              background: rgba(248, 113, 113, 0.3);
+            }
+          }
+        }
       }
 
       .header-right {
@@ -367,13 +414,13 @@ export default {
           background: rgba(0, 229, 255, 0.12);
           border: 1px solid rgba(0, 229, 255, 0.3);
           color: #00e5ff;
-          padding: 4px 9px;
-          border-radius: 12px;
-          font-size: 0.78rem;
-          font-weight: 700;
+          width: 26px;
+          height: 26px;
+          border-radius: 50%;
+          font-size: 0.82rem;
           display: flex;
           align-items: center;
-          gap: 4px;
+          justify-content: center;
           cursor: pointer;
           touch-action: manipulation;
           transition: all 0.15s ease;
@@ -390,28 +437,47 @@ export default {
           }
         }
 
-        .status-indicator {
+        .live-pill-btn {
           display: flex;
           align-items: center;
           gap: 5px;
+          background: rgba(255, 255, 255, 0.06);
+          border: 1px solid rgba(255, 255, 255, 0.12);
+          border-radius: 12px;
+          padding: 3px 8px;
+          cursor: pointer;
+          transition: all 0.15s ease;
 
           .live-dot {
             width: 7px;
             height: 7px;
             border-radius: 50%;
-            background: #4caf50;
+            background: #4ade80;
 
             &.pulsing {
-              background: #ff5252;
-              box-shadow: 0 0 8px #ff5252;
+              background: #00e5ff;
+              box-shadow: 0 0 8px #00e5ff;
               animation: pulse 1.5s infinite;
             }
           }
 
-          .status-text {
-            font-size: 0.75rem;
+          .live-text {
+            font-size: 0.72rem;
             font-weight: 600;
-            color: #bbb;
+            color: #94a3b8;
+          }
+
+          &.active {
+            background: rgba(0, 229, 255, 0.15);
+            border-color: rgba(0, 229, 255, 0.4);
+
+            .live-text {
+              color: #00e5ff;
+            }
+          }
+
+          &:hover {
+            background: rgba(255, 255, 255, 0.12);
           }
         }
 
@@ -434,67 +500,6 @@ export default {
             background: rgba(255, 255, 255, 0.25);
             color: #fff;
           }
-        }
-      }
-    }
-
-    .player-filter-bar {
-      font-size: 0.78rem;
-      color: #ccc;
-      display: flex;
-      gap: 6px;
-      align-items: center;
-      background: rgba(255, 255, 255, 0.05);
-      padding: 4px 10px;
-      border-radius: 6px;
-      border: 1px solid rgba(255, 255, 255, 0.08);
-
-      .filter-icon {
-        font-size: 0.85rem;
-      }
-
-      .filter-label {
-        color: #aaa;
-        font-weight: 500;
-        white-space: nowrap;
-      }
-
-      .player-select {
-        flex: 1;
-        background: rgba(0, 0, 0, 0.45);
-        color: #ffd54f;
-        border: 1px solid rgba(255, 255, 255, 0.15);
-        border-radius: 4px;
-        padding: 3px 8px;
-        font-size: 0.78rem;
-        font-weight: 600;
-        outline: none;
-        cursor: pointer;
-
-        option {
-          background: #1e1e24;
-          color: #fff;
-          font-weight: normal;
-        }
-
-        &:focus {
-          border-color: #00e5ff;
-        }
-      }
-
-      .clear-filter-btn {
-        background: rgba(255, 255, 255, 0.1);
-        border: none;
-        color: #ff5252;
-        border-radius: 4px;
-        padding: 2px 7px;
-        font-size: 0.75rem;
-        cursor: pointer;
-        font-weight: bold;
-        transition: background 0.15s ease;
-
-        &:hover {
-          background: rgba(255, 82, 82, 0.25);
         }
       }
     }
@@ -604,38 +609,22 @@ export default {
         }
 
         &.play-btn {
-          background: #00e5ff;
-          color: #000;
+          background: linear-gradient(135deg, #0284c7, #2563eb);
+          border: 1px solid rgba(56, 189, 248, 0.4);
+          color: #fff;
           font-weight: 700;
           padding: 6px 14px;
+          box-shadow: 0 2px 10px rgba(37, 99, 235, 0.35);
 
           &:hover, &:active {
-            background: #26c6da;
-          }
-        }
-
-        &.live-btn {
-          background: rgba(244, 67, 54, 0.15);
-          border-color: rgba(244, 67, 54, 0.4);
-          color: #ff5252;
-
-          .live-dot-inline {
-            width: 6px;
-            height: 6px;
-            border-radius: 50%;
-            background: #ff5252;
+            background: linear-gradient(135deg, #0369a1, #1d4ed8);
+            transform: translateY(-1px);
           }
 
-          &.active {
-            background: #ff5252;
-            color: #fff;
-            .live-dot-inline {
-              background: #fff;
-            }
-          }
-
-          &:hover, &:active {
-            background: rgba(244, 67, 54, 0.3);
+          &.playing {
+            background: linear-gradient(135deg, #e11d48, #be123c);
+            border-color: rgba(244, 63, 94, 0.4);
+            box-shadow: 0 2px 10px rgba(225, 29, 72, 0.35);
           }
         }
 
