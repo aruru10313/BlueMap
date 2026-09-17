@@ -24,7 +24,7 @@
  */
 
 import {MathUtils, Vector3} from "three";
-import {dispatchEvent} from "../util/Utils";
+import {dispatchEvent, animate, EasingFunctions} from "../util/Utils";
 import {Map} from "../map/Map";
 import {reactive} from "vue";
 
@@ -45,6 +45,7 @@ export class ControlsManager {
 			rotation: 0,
 			angle: 0,
 			tilt: 0,
+			axisLock: false,
 		});
 
 		this.mapViewer = mapViewer;
@@ -98,6 +99,12 @@ export class ControlsManager {
 			// wrap rotation
 			while (this.rotation >= Math.PI) this.rotation -= Math.PI * 2;
 			while (this.rotation <= -Math.PI) this.rotation += Math.PI * 2;
+
+			// clamp to cardinal axes if axisLock is active
+			if (this.data.axisLock) {
+				let step = Math.PI / 2;
+				this.rotation = Math.round(this.rotation / step) * step;
+			}
 
 			// prevent problems with the rotation when the angle is 0 (top-down) or distance is 0 (first-person)
 			let rotatableAngle = this.angle;
@@ -332,5 +339,49 @@ export class ControlsManager {
 	 */
 	set tilt(value) {
 		this.data.tilt = value;
+	}
+
+	/**
+	 * @returns {boolean}
+	 */
+	get axisLock() {
+		return this.data.axisLock;
+	}
+
+	/**
+	 * @param value {boolean}
+	 */
+	set axisLock(value) {
+		let enable = !!value;
+		this.data.axisLock = enable;
+		if (enable) {
+			this.snapToAxis(true);
+		}
+	}
+
+	/**
+	 * Snaps camera rotation smoothly to the nearest 90-degree chunk axis (North, East, South, West)
+	 * @param smooth {boolean}
+	 */
+	snapToAxis(smooth = true) {
+		let current = this.data.rotation;
+		let step = Math.PI / 2;
+		let target = Math.round(current / step) * step;
+		while (target >= Math.PI) target -= Math.PI * 2;
+		while (target <= -Math.PI) target += Math.PI * 2;
+
+		if (smooth) {
+			let start = current;
+			let diff = target - start;
+			while (diff < -Math.PI) diff += Math.PI * 2;
+			while (diff > Math.PI) diff -= Math.PI * 2;
+			animate(t => {
+				let ep = EasingFunctions.easeOutQuad(t);
+				this.rotation = start + diff * ep;
+			}, 300);
+		} else {
+			this.rotation = target;
+			this.updateCamera();
+		}
 	}
 }

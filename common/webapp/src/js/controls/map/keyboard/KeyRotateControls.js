@@ -102,10 +102,20 @@ export class KeyRotateControls {
      */
     onKeyDown = evt => {
         if (KeyCombination.oneDown(evt, ...KeyRotateControls.KEYS.LEFT)){
+            if (this.manager && this.manager.axisLock) {
+                this.manager.rotation += Math.PI / 2;
+                evt.preventDefault();
+                return;
+            }
             this.left = true;
             evt.preventDefault();
         }
         if (KeyCombination.oneDown(evt, ...KeyRotateControls.KEYS.RIGHT)){
+            if (this.manager && this.manager.axisLock) {
+                this.manager.rotation -= Math.PI / 2;
+                evt.preventDefault();
+                return;
+            }
             this.right = true;
             evt.preventDefault();
         }

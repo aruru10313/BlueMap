@@ -61,9 +61,25 @@
         <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm.5-13H11v6l5.2 3.2.8-1.3-4.5-2.7V7z"/>
       </svg>
     </SvgButton>
-    <div class="space" v-if="showMapMenu && appState.blockManager"></div>
     <PositionInput v-if="showMapMenu" class="pos-input" />
     <Compass v-if="showMapMenu" :title="$t('compass.tooltip')" />
+    <SvgButton
+        v-if="showMapMenu"
+        class="axis-lock-btn"
+        :class="{'active': controls.axisLock}"
+        :title="controls.axisLock ? '청크 축 고정 해제 (자유 회전)' : '청크 축 고정 (90° 격자 정렬)'"
+        @action="toggleAxisLock"
+    >
+      <svg viewBox="0 0 24 24" fill="none">
+        <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" stroke-width="1.8"/>
+        <line x1="9" y1="3" x2="9" y2="21" stroke="currentColor" stroke-width="1.2" stroke-dasharray="2 1.5"/>
+        <line x1="15" y1="3" x2="15" y2="21" stroke="currentColor" stroke-width="1.2" stroke-dasharray="2 1.5"/>
+        <line x1="3" y1="9" x2="21" y2="9" stroke="currentColor" stroke-width="1.2" stroke-dasharray="2 1.5"/>
+        <line x1="3" y1="15" x2="21" y2="15" stroke="currentColor" stroke-width="1.2" stroke-dasharray="2 1.5"/>
+        <circle v-if="controls.axisLock" cx="12" cy="12" r="3.2" fill="#38bdf8"/>
+        <circle v-else cx="12" cy="12" r="1.5" fill="currentColor" opacity="0.6"/>
+      </svg>
+    </SvgButton>
   </div>
 </template>
 
@@ -89,7 +105,8 @@
       return {
         appState: this.$bluemap.appState,
         markers: this.$bluemap.mapViewer.markers.data,
-        mapViewer: this.$bluemap.mapViewer.data
+        mapViewer: this.$bluemap.mapViewer.data,
+        controls: this.$bluemap.mapViewer.controlsManager.data
       }
     },
     computed: {
@@ -130,6 +147,13 @@
           }
         }
         return false;
+      },
+      toggleAxisLock() {
+        let cm = this.$bluemap.mapViewer.controlsManager;
+        cm.axisLock = !cm.axisLock;
+        if (cm.axisLock && !this.mapViewer.uniforms.chunkBorders.value) {
+          this.$bluemap.setChunkBorders(true);
+        }
       }
     }
   }
@@ -150,6 +174,17 @@
 
     margin: 0.5em;
     width: calc(100% - 1em);
+
+    .axis-lock-btn {
+      &.active {
+        background-color: rgba(56, 189, 248, 0.25) !important;
+        color: #38bdf8 !important;
+      }
+      svg {
+        height: 1.4em;
+        width: 1.4em;
+      }
+    }
 
     .pos-input {
       max-width: 20em;

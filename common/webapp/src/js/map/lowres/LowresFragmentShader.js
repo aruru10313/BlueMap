@@ -131,9 +131,9 @@ void main() {
 	color.rgb *= mix(ambientLight, 1.0, light / 15.0);
 
 	if (chunkBorders) {
-		vec4 lineColour = vec4(1.0, 0.0, 1.0, 0.4);
+		vec4 lineColour = vec4(1.0, 0.88, 0.0, 0.95);
 		float lineInterval = 16.0;
-		float lineThickness = 0.125; //width of two Minecraft pixels
+		float lineThickness = 0.35;
 		float offset = 0.5;
 
 		vec2 worldPos = vWorldPosition.xz;

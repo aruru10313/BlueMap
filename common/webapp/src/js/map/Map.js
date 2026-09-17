@@ -126,6 +126,16 @@ export class Map {
                 let textures = values[1];
                 if (textures === null) throw new Error("Failed to parse textures.json!");
 
+                this.textures = textures;
+                let texMap = {};
+                for (let i = 0; i < textures.length; i++) {
+                    let t = textures[i];
+                    if (t.resourcePath) {
+                        texMap[t.resourcePath] = t;
+                    }
+                }
+                this.texturesMap = texMap;
+
                 this.hiresMaterial = this.createHiresMaterial(hiresVertexShader, hiresFragmentShader, uniforms, textures);
 
                 this.hiresTileManager = new TileManager(new TileLoader(

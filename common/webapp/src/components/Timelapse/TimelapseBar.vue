@@ -14,6 +14,9 @@
       <button class="timelapse-toggle-btn" @click="toggleOpen" title="타임랩스 / 실시간 타임라인 열기">
         <span class="icon">⏱</span>
         <span class="label">타임랩스</span>
+        <span v-if="currentAction" class="mini-player-badge">
+          👤 {{ currentAction.player }} • {{ formatBlockName(currentAction.block) }}
+        </span>
         <span class="live-dot-mini" :class="{'pulsing': blockState.isPlaying || (isViewingToday && blockState.progress >= 0.999)}"></span>
       </button>
 
@@ -134,6 +137,39 @@
           </button>
 
           <button class="close-btn" @click="toggleOpen" title="최소화">✕</button>
+        </div>
+      </div>
+
+      <!-- Placed Block / User Placement Info HUD ("누가 설치했는지 보이지") -->
+      <div class="action-hud-bar">
+        <div v-if="currentAction" class="action-hud-card" @click="focusCurrentAction" title="클릭하여 해당 블록 위치로 카메라 이동">
+          <div class="hud-left">
+            <span class="hud-badge" :class="currentAction.action">
+              {{ currentAction.action === 'place' ? '🧱 설치' : '⛏️ 파괴' }}
+            </span>
+            <span class="hud-player">
+              <span class="hud-icon">👤</span>
+              <strong class="hud-name">{{ currentAction.player }}</strong>
+            </span>
+            <span class="hud-block">
+              {{ formatBlockName(currentAction.block) }}
+            </span>
+          </div>
+
+          <div class="hud-right">
+            <span class="hud-coords" title="블록 좌표">
+              📍 {{ currentAction.x }}, {{ currentAction.y }}, {{ currentAction.z }}
+            </span>
+            <span class="hud-time" title="작업 시각">
+              🕒 {{ formatActionTime(currentAction.time) }}
+            </span>
+            <span class="hud-focus-pill" title="해당 위치로 카메라 이동">🔍 이동</span>
+          </div>
+        </div>
+
+        <div v-else class="action-hud-card empty">
+          <span class="hud-empty-icon">⏳</span>
+          <span class="hud-empty-text">해당 시점 이전의 건축 기록을 탐색 중입니다</span>
         </div>
       </div>
 
@@ -269,6 +305,9 @@ export default {
     currentTimeLabel() {
       if (!this.blockState) return "00:00:00";
       return this.formatClock(this.blockState.currentTime);
+    },
+    currentAction() {
+      return this.blockState ? this.blockState.currentAction : null;
     }
   },
   methods: {
@@ -412,6 +451,23 @@ export default {
       let m = String(d.getMinutes()).padStart(2, "0");
       let s = String(d.getSeconds()).padStart(2, "0");
       return `${h}:${m}:${s}`;
+    },
+    focusCurrentAction() {
+      if (this.currentAction && this.blockManager) {
+        this.blockManager.focusOnBlock(this.currentAction.x, this.currentAction.y, this.currentAction.z);
+      }
+    },
+    formatBlockName(b) {
+      if (!b) return "블록";
+      return b.replace("minecraft:", "").replace(/_/g, " ");
+    },
+    formatActionTime(ts) {
+      if (!ts) return "";
+      let d = new Date(ts);
+      let h = String(d.getHours()).padStart(2, "0");
+      let m = String(d.getMinutes()).padStart(2, "0");
+      let s = String(d.getSeconds()).padStart(2, "0");
+      return `${h}:${m}:${s}`;
     }
   }
 };
@@ -502,6 +558,18 @@ export default {
 
       .icon {
         font-size: 1.15rem;
+      }
+
+      .mini-player-badge {
+        font-size: 0.8rem;
+        color: #fcd34d;
+        background: rgba(245, 158, 11, 0.16);
+        border: 1px solid rgba(245, 158, 11, 0.35);
+        padding: 2px 8px;
+        border-radius: 12px;
+        margin-left: 2px;
+        white-space: nowrap;
+        font-weight: 600;
       }
 
       .live-dot-mini {
@@ -1040,6 +1108,144 @@ export default {
           &:hover {
             background: rgba(255, 255, 255, 0.15);
             color: #fff;
+          }
+        }
+      }
+    }
+
+    /* Placed Block / User Placement HUD ("누가 설치했는지") */
+    .action-hud-bar {
+      width: 100%;
+      box-sizing: border-box;
+
+      .action-hud-card {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 14px;
+        padding: 6px 12px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        gap: 10px;
+
+        &:hover {
+          background: rgba(255, 255, 255, 0.12);
+          border-color: rgba(56, 189, 248, 0.5);
+          transform: translateY(-1px);
+          box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+        }
+
+        &.empty {
+          cursor: default;
+          justify-content: center;
+          background: rgba(255, 255, 255, 0.03);
+          border-style: dashed;
+          color: #64748b;
+          font-size: 0.78rem;
+          padding: 7px 12px;
+
+          &:hover {
+            transform: none;
+            box-shadow: none;
+            border-color: rgba(255, 255, 255, 0.12);
+          }
+
+          .hud-empty-icon {
+            font-size: 0.85rem;
+            margin-right: 6px;
+          }
+        }
+
+        .hud-left {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          flex-shrink: 0;
+          min-width: 0;
+
+          .hud-badge {
+            font-size: 0.72rem;
+            font-weight: 700;
+            padding: 2px 7px;
+            border-radius: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.2px;
+
+            &.place {
+              background: rgba(16, 185, 129, 0.2);
+              color: #34d399;
+              border: 1px solid rgba(16, 185, 129, 0.35);
+            }
+
+            &.break {
+              background: rgba(239, 68, 68, 0.2);
+              color: #f87171;
+              border: 1px solid rgba(239, 68, 68, 0.35);
+            }
+          }
+
+          .hud-player {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            color: #f59e0b;
+            font-size: 0.84rem;
+
+            .hud-name {
+              font-weight: 700;
+              color: #fcd34d;
+              white-space: nowrap;
+            }
+          }
+
+          .hud-block {
+            color: #f1f5f9;
+            font-weight: 600;
+            font-size: 0.82rem;
+            background: rgba(255, 255, 255, 0.08);
+            padding: 2px 8px;
+            border-radius: 6px;
+            white-space: nowrap;
+          }
+        }
+
+        .hud-right {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          flex-shrink: 0;
+
+          .hud-coords {
+            font-size: 0.78rem;
+            font-family: monospace;
+            color: #94a3b8;
+            background: rgba(0, 0, 0, 0.25);
+            padding: 2px 7px;
+            border-radius: 6px;
+          }
+
+          .hud-time {
+            font-size: 0.78rem;
+            color: #38bdf8;
+            font-weight: 600;
+          }
+
+          .hud-focus-pill {
+            font-size: 0.72rem;
+            font-weight: 600;
+            color: #cbd5e1;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 2px 7px;
+            border-radius: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            transition: all 0.15s ease;
+
+            &:hover {
+              background: #38bdf8;
+              color: #0f172a;
+            }
           }
         }
       }

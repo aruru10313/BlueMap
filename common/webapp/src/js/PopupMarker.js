@@ -139,6 +139,25 @@ export class PopupMarker extends Marker {
             `;
         }
 
+        if (this.appState.blockManager && this.appState.blockManager.getBlockInfo) {
+            let blockInfo = this.appState.blockManager.getBlockInfo(this.position.x, this.position.y, this.position.z);
+            if (blockInfo) {
+                let timeStr = blockInfo.time ? new Date(blockInfo.time).toLocaleTimeString() : "";
+                let actionBadge = blockInfo.action === "place" ? `<span style="color:#10b981;font-weight:bold;">설치</span>` : `<span style="color:#ef4444;font-weight:bold;">파괴</span>`;
+                this.element.innerHTML += `
+                    <hr>
+                    <div class="group timelapse-info" style="padding: 2px 0;">
+                        <div class="label" style="color: #38bdf8; font-weight: bold;">🛠️ 타임랩스 기록:</div>
+                        <div class="content" style="display: flex; flex-direction: column; gap: 2px;">
+                            <div class="entry"><span class="label">👤 작업자: </span><span class="value" style="color: #fbbf24; font-weight: bold;">${blockInfo.player}</span></div>
+                            <div class="entry"><span class="label">🧱 블록: </span><span class="value">${blockInfo.block} (${actionBadge})</span></div>
+                            ${timeStr ? `<div class="entry"><span class="label">🕒 시간: </span><span class="value">${timeStr}</span></div>` : ''}
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
         if (this.appState.debug) {
             let chunkCoords = this.position.clone().divideScalar(16).floor();
             let regionCoords = new Vector2(this.position.x, this.position.z).divideScalar(512).floor();

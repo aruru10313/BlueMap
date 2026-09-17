@@ -27,16 +27,18 @@ import {
     Color,
     DynamicDrawUsage,
     Group,
-    InstancedBufferAttribute,
     InstancedMesh,
     LineBasicMaterial,
     LineSegments,
     Matrix4,
+    MathUtils,
     MeshBasicMaterial,
+    NearestFilter,
+    Texture,
     WireframeGeometry
 } from "three";
 import {reactive} from "vue";
-import {alert} from "../util/Utils";
+import {alert, stringToImage, animate, EasingFunctions} from "../util/Utils";
 
 const BLOCK_COLORS = {
     "minecraft:stone": 0x757575,
@@ -199,6 +201,7 @@ export class BlockManager {
             availableDates: [],
             latestPlayer: null,
             latestBlock: null,
+            currentAction: null,
             isSyncing: false,
             syncStatusText: "",
             toastMessage: ""
@@ -215,27 +218,16 @@ export class BlockManager {
         this.sceneGroup.name = "bm-live-blocks";
         this.rootGroup.add(this.sceneGroup);
 
-        // InstancedMesh for high performance (Single draw call)
-        this.maxInstances = 50000;
-        const boxGeometry = new BoxGeometry(1.002, 1.002, 1.002);
-        const boxMaterial = new MeshBasicMaterial({
-            color: 0xffffff,
-            polygonOffset: true,
-            polygonOffsetFactor: -1,
-            polygonOffsetUnits: -1
-        });
-        this.instancedMesh = new InstancedMesh(boxGeometry, boxMaterial, this.maxInstances);
-        this.instancedMesh.instanceMatrix.setUsage(DynamicDrawUsage);
-        this.instancedMesh.frustumCulled = false; // Prevent culling when camera moves away from origin
+        // Textured Box Geometry for blocks
+        this.boxGeometry = new BoxGeometry(1.002, 1.002, 1.002);
 
-        // Pre-allocate instanceColor attribute so shader compiles with USE_INSTANCING_COLOR immediately
-        const colorArray = new Float32Array(this.maxInstances * 3);
-        colorArray.fill(1.0);
-        this.instancedMesh.instanceColor = new InstancedBufferAttribute(colorArray, 3);
-        this.instancedMesh.instanceColor.setUsage(DynamicDrawUsage);
+        // Instanced meshes per block type: Map<blockId, InstancedMesh>
+        this.instancedMeshes = new Map();
 
-        this.instancedMesh.count = 0;
-        this.sceneGroup.add(this.instancedMesh);
+        // Texture and Material Caches for high-quality Minecraft block textures
+        this.texturesMap = null;
+        this.textureCache = new Map(); // resourcePath -> Texture
+        this.materialCache = new Map(); // blockId -> Material[] (6 faces)
 
         // Real-time flash effect pulse boxes
         this.pulseGroup = new Group();
@@ -273,7 +265,8 @@ export class BlockManager {
         };
         this._rafId = requestAnimationFrame(tick);
 
-        // Start initial load & poll
+        // Start initial texture load & history fetch & polling
+        this.loadTextures();
         this.fetchFullHistory().then(() => {
             this.startPolling(1000);
         });
@@ -483,48 +476,291 @@ export class BlockManager {
             }
         }
 
+        // Find latest action event up to targetTime (matching playerFilter if set)
+        let latestReplayedEvt = null;
+        for (let i = this.eventsList.length - 1; i >= 0; i--) {
+            let evt = this.eventsList[i];
+            if (evt.t < bounds.start || evt.t > bounds.end) continue;
+            if (playerFilter && evt.p !== playerFilter) continue;
+            if (evt.t <= targetTime) {
+                latestReplayedEvt = evt;
+                break;
+            }
+        }
+
+        if (latestReplayedEvt) {
+            this.data.currentAction = {
+                player: latestReplayedEvt.p || "Player",
+                block: (latestReplayedEvt.b || "block").replace("minecraft:", ""),
+                rawBlock: latestReplayedEvt.b,
+                x: latestReplayedEvt.x,
+                y: latestReplayedEvt.y,
+                z: latestReplayedEvt.z,
+                action: latestReplayedEvt.a || "place",
+                time: latestReplayedEvt.t
+            };
+        } else {
+            this.data.currentAction = null;
+        }
+
         this.syncInstancedMesh();
     }
 
-    syncInstancedMesh() {
-        if (!this.instancedMesh) return;
+    getBlockInfo(x, y, z) {
+        let ix = Math.floor(x);
+        let iy = Math.floor(y);
+        let iz = Math.floor(z);
+        let key = `${ix},${iy},${iz}`;
+        let block = this.activeBlocks.get(key);
+        if (block) {
+            return {
+                player: block.p || "알 수 없음",
+                block: (block.b || "블록").replace("minecraft:", ""),
+                rawBlock: block.b,
+                x: block.x,
+                y: block.y,
+                z: block.z,
+                action: "place",
+                time: block.t
+            };
+        }
 
-        let blocks = Array.from(this.activeBlocks.values());
-        let count = Math.min(blocks.length, this.maxInstances);
+        // Check recent history for this block position
+        for (let i = this.eventsList.length - 1; i >= 0; i--) {
+            let evt = this.eventsList[i];
+            if (evt.x === ix && evt.y === iy && evt.z === iz) {
+                return {
+                    player: evt.p || "알 수 없음",
+                    block: (evt.b || "블록").replace("minecraft:", ""),
+                    rawBlock: evt.b,
+                    x: evt.x,
+                    y: evt.y,
+                    z: evt.z,
+                    action: evt.a || "place",
+                    time: evt.t
+                };
+            }
+        }
+        return null;
+    }
+
+    async loadTextures() {
+        if (this.texturesMap) {
+            let count = this.texturesMap instanceof window.Map ? this.texturesMap.size : Object.keys(this.texturesMap).length;
+            if (count > 0) return;
+        }
+
+        // 1. Try getting from mapViewer.map
+        let map = this.mapViewer?.map;
+        if (map && map.texturesMap) {
+            this.texturesMap = map.texturesMap;
+            this.materialCache.clear();
+            this.syncInstancedMesh();
+            return;
+        }
+
+        // 2. Otherwise fetch from textures.json
+        try {
+            let url = (map && map.data && map.data.texturesUrl) || "/maps/world/textures.json";
+            let res = await fetch(url);
+            if (res.ok) {
+                let textures = await res.json();
+                this.texturesMap = {};
+                for (let i = 0; i < textures.length; i++) {
+                    let t = textures[i];
+                    if (t.resourcePath) {
+                        this.texturesMap[t.resourcePath] = t;
+                    }
+                }
+                this.materialCache.clear();
+                this.syncInstancedMesh();
+            }
+        } catch (e) {
+            console.warn("[BlockManager] Failed to load textures.json:", e);
+        }
+    }
+
+    getTextureItem(resourcePath) {
+        if (!this.texturesMap || !resourcePath) return null;
+        if (this.texturesMap instanceof window.Map) {
+            return this.texturesMap.get(resourcePath);
+        }
+        return this.texturesMap[resourcePath] || null;
+    }
+
+    getTexture(resourcePath) {
+        if (!resourcePath) return null;
+        if (this.textureCache.has(resourcePath)) {
+            return this.textureCache.get(resourcePath);
+        }
+
+        const item = this.getTextureItem(resourcePath);
+        if (!item || !item.texture) return null;
+
+        const texture = new Texture();
+        const img = stringToImage(item.texture);
+
+        const setupTexture = () => {
+            texture.image = img;
+            texture.magFilter = NearestFilter;
+            texture.minFilter = NearestFilter;
+            texture.generateMipmaps = false;
+            texture.flipY = false;
+            texture.needsUpdate = true;
+            if (this.mapViewer) this.mapViewer.redraw();
+        };
+
+        img.onload = setupTexture;
+        if (img.complete && img.naturalWidth > 0) {
+            setupTexture();
+        }
+
+        this.textureCache.set(resourcePath, texture);
+        return texture;
+    }
+
+    getBlockMaterials(blockId) {
+        let cleanId = (blockId || "minecraft:stone").trim().toLowerCase();
+        if (this.materialCache.has(cleanId)) {
+            return this.materialCache.get(cleanId);
+        }
+
+        let parts = cleanId.split(":", 2);
+        let namespace = parts.length === 2 ? parts[0] : "minecraft";
+        let name = parts.length === 2 ? parts[1] : parts[0];
+
+        // 1. Resolve top, bottom, side texture paths
+        let topPath = `${namespace}:block/${name}_top`;
+        let bottomPath = `${namespace}:block/${name}_bottom`;
+        let sidePath = `${namespace}:block/${name}_side`;
+        let directPath = `${namespace}:block/${name}`;
+
+        // Minecraft special mappings
+        if (name === "grass_block") {
+            bottomPath = "minecraft:block/dirt";
+        } else if (name.includes("log") && !name.endsWith("_top")) {
+            let logTop = `${namespace}:block/${name}_top`;
+            if (this.getTextureItem(logTop)) {
+                topPath = bottomPath = logTop;
+                sidePath = directPath;
+            }
+        } else if (name === "crafting_table") {
+            bottomPath = "minecraft:block/oak_planks";
+        }
+
+        let topItem = this.getTextureItem(topPath) || this.getTextureItem(directPath);
+        let bottomItem = this.getTextureItem(bottomPath) || this.getTextureItem(directPath) || topItem;
+        let sideItem = this.getTextureItem(sidePath) || this.getTextureItem(directPath) || topItem;
+
+        // Fuzzy match
+        if (!topItem && !sideItem && this.texturesMap) {
+            let entries = this.texturesMap instanceof window.Map ? this.texturesMap.entries() : Object.entries(this.texturesMap);
+            for (let [path, item] of entries) {
+                if (path.includes(`:block/${name}`) || path.endsWith(`/${name}`)) {
+                    topItem = bottomItem = sideItem = item;
+                    break;
+                }
+            }
+        }
+
+        const makeMaterial = (item, fallbackColor) => {
+            if (item && item.texture) {
+                const tex = this.getTexture(item.resourcePath);
+                let isTransparent = !!item.halfTransparent || name.includes("glass") || name.includes("leaves") || name.includes("ice");
+                return new MeshBasicMaterial({
+                    map: tex,
+                    transparent: isTransparent,
+                    alphaTest: isTransparent ? 0.1 : 0,
+                    polygonOffset: true,
+                    polygonOffsetFactor: -1,
+                    polygonOffsetUnits: -1
+                });
+            } else {
+                return new MeshBasicMaterial({
+                    color: fallbackColor,
+                    polygonOffset: true,
+                    polygonOffsetFactor: -1,
+                    polygonOffsetUnits: -1
+                });
+            }
+        };
+
+        const fallbackColor = getBlockColor(cleanId);
+        const matTop = makeMaterial(topItem, fallbackColor);
+        const matBottom = makeMaterial(bottomItem, fallbackColor);
+        const matSide = makeMaterial(sideItem, fallbackColor);
+
+        // BoxGeometry groups: [ +X, -X, +Y, -Y, +Z, -Z ] -> [ side, side, top, bottom, side, side ]
+        const materials = [matSide, matSide, matTop, matBottom, matSide, matSide];
+        this.materialCache.set(cleanId, materials);
+        return materials;
+    }
+
+    syncInstancedMesh() {
+        if (this.disposed) return;
+
+        // Ensure textures are loaded if available
+        if (!this.texturesMap && this.mapViewer?.map?.texturesMap) {
+            this.texturesMap = this.mapViewer.map.texturesMap;
+        }
+
+        // Group active blocks by block type
+        let typeGroups = new Map();
+        for (let b of this.activeBlocks.values()) {
+            let type = (b.b || "minecraft:stone").trim().toLowerCase();
+            let list = typeGroups.get(type);
+            if (!list) {
+                list = [];
+                typeGroups.set(type, list);
+            }
+            list.push(b);
+        }
 
         const matrix = this._tempMatrix;
-        const color = this._tempColor;
 
-        for (let i = 0; i < count; i++) {
-            let b = blocks[i];
-            matrix.setPosition(b.x + 0.5, b.y + 0.5, b.z + 0.5);
-            this.instancedMesh.setMatrixAt(i, matrix);
+        // Update or create InstancedMesh for each block type
+        for (let [type, blocks] of typeGroups.entries()) {
+            let mesh = this.instancedMeshes.get(type);
+            let neededCapacity = blocks.length;
 
-            color.setHex(b.color);
-            this.instancedMesh.setColorAt(i, color);
-        }
-
-        this.instancedMesh.count = count;
-        this.instancedMesh.visible = count > 0;
-
-        let updateCount = Math.max(1, count);
-        if (this.instancedMesh.instanceMatrix.addUpdateRange) {
-            this.instancedMesh.instanceMatrix.addUpdateRange(0, updateCount * 16);
-        } else {
-            this.instancedMesh.instanceMatrix.updateRange = { offset: 0, count: updateCount * 16 };
-        }
-        this.instancedMesh.instanceMatrix.needsUpdate = true;
-
-        if (this.instancedMesh.instanceColor) {
-            if (this.instancedMesh.instanceColor.addUpdateRange) {
-                this.instancedMesh.instanceColor.addUpdateRange(0, updateCount * 3);
-            } else {
-                this.instancedMesh.instanceColor.updateRange = { offset: 0, count: updateCount * 3 };
+            if (!mesh || mesh.instanceMatrix.count < neededCapacity) {
+                if (mesh) {
+                    this.sceneGroup.remove(mesh);
+                }
+                const materials = this.getBlockMaterials(type);
+                const capacity = Math.max(50, Math.ceil(neededCapacity * 1.5));
+                mesh = new InstancedMesh(this.boxGeometry, materials, capacity);
+                mesh.instanceMatrix.setUsage(DynamicDrawUsage);
+                mesh.frustumCulled = false;
+                this.instancedMeshes.set(type, mesh);
+                this.sceneGroup.add(mesh);
             }
-            this.instancedMesh.instanceColor.needsUpdate = true;
+
+            for (let i = 0; i < blocks.length; i++) {
+                let b = blocks[i];
+                matrix.setPosition(b.x + 0.5, b.y + 0.5, b.z + 0.5);
+                mesh.setMatrixAt(i, matrix);
+            }
+
+            mesh.count = blocks.length;
+            mesh.visible = blocks.length > 0;
+            if (mesh.instanceMatrix.addUpdateRange) {
+                mesh.instanceMatrix.addUpdateRange(0, Math.max(1, blocks.length) * 16);
+            } else {
+                mesh.instanceMatrix.updateRange = { offset: 0, count: Math.max(1, blocks.length) * 16 };
+            }
+            mesh.instanceMatrix.needsUpdate = true;
         }
 
-        this.data.renderedBlocks = count;
+        // Hide any meshes that no longer have blocks
+        for (let [type, mesh] of this.instancedMeshes.entries()) {
+            if (!typeGroups.has(type)) {
+                mesh.count = 0;
+                mesh.visible = false;
+            }
+        }
+
+        this.data.renderedBlocks = this.activeBlocks.size;
         if (this.mapViewer) {
             this.mapViewer.redraw();
         }
@@ -804,8 +1040,18 @@ export class BlockManager {
         if (!this.mapViewer || !this.mapViewer.controlsManager) return;
         let controls = this.mapViewer.controlsManager;
         if (controls.position) {
-            controls.position.x = x + 0.5;
-            controls.position.z = z + 0.5;
+            let targetX = x + 0.5;
+            let targetY = y !== undefined ? y + 0.5 : controls.position.y;
+            let targetZ = z + 0.5;
+            let startX = controls.position.x;
+            let startY = controls.position.y;
+            let startZ = controls.position.z;
+            animate(t => {
+                let ep = EasingFunctions.easeOutQuad(t);
+                controls.position.x = MathUtils.lerp(startX, targetX, ep);
+                controls.position.y = MathUtils.lerp(startY, targetY, ep);
+                controls.position.z = MathUtils.lerp(startZ, targetZ, ep);
+            }, 350);
         }
     }
 
@@ -826,15 +1072,23 @@ export class BlockManager {
             this.rootGroup.remove(this.sceneGroup);
         }
 
-        if (this.instancedMesh) {
-            this.instancedMesh.geometry.dispose();
-            if (Array.isArray(this.instancedMesh.material)) {
-                this.instancedMesh.material.forEach(m => m.dispose());
-            } else {
-                this.instancedMesh.material.dispose();
+        for (let mesh of this.instancedMeshes.values()) {
+            this.sceneGroup.remove(mesh);
+            if (Array.isArray(mesh.material)) {
+                mesh.material.forEach(m => {
+                    if (m.map) m.map.dispose();
+                    m.dispose();
+                });
+            } else if (mesh.material) {
+                if (mesh.material.map) mesh.material.map.dispose();
+                mesh.material.dispose();
             }
         }
+        this.instancedMeshes.clear();
+        this.materialCache.clear();
+        this.textureCache.clear();
 
+        if (this.boxGeometry) this.boxGeometry.dispose();
         if (this.wireGeometry) this.wireGeometry.dispose();
         if (this.wireMaterial) this.wireMaterial.dispose();
     }

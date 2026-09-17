@@ -68,6 +68,11 @@ export class TouchRotateControls {
      * @param map {Map}
      */
     update(delta, map) {
+        if (this.manager && this.manager.axisLock) {
+            this.deltaRotation = 0;
+            return;
+        }
+
         if (this.deltaRotation === 0) return;
 
         let smoothing = this.stiffness / (16.666 / delta);
