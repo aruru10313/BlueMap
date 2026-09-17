@@ -44,11 +44,17 @@
         </div>
       </div>
 
-      <!-- Recent player placement alert if available -->
-      <div v-if="blockState.latestPlayer" class="recent-player-bar">
-        <span class="player-tag">최근 설치:</span>
-        <span class="player-name">{{ blockState.latestPlayer }}</span>
-        <span class="block-name">{{ blockState.latestBlock }}</span>
+      <!-- Player Filter Bar (Select specific user or view all) -->
+      <div class="player-filter-bar">
+        <span class="filter-icon">👤</span>
+        <span class="filter-label">유저:</span>
+        <select class="player-select" :value="blockState.selectedPlayer" @change="onPlayerChange">
+          <option value="">전체 유저 ({{ blockState.totalEvents }}개 블럭)</option>
+          <option v-for="player in blockState.playersList" :key="player" :value="player">
+            {{ player }}
+          </option>
+        </select>
+        <button v-if="blockState.selectedPlayer" class="clear-filter-btn" @click="clearPlayerFilter" title="전체 유저로 초기화">✕</button>
       </div>
 
       <!-- Scrubber Timeline Slider -->
@@ -163,6 +169,16 @@ export default {
     toggleFollow() {
       if (this.blockState) {
         this.blockState.autoFollow = !this.blockState.autoFollow;
+      }
+    },
+    onPlayerChange(e) {
+      if (this.blockManager) {
+        this.blockManager.setPlayerFilter(e.target.value);
+      }
+    },
+    clearPlayerFilter() {
+      if (this.blockManager) {
+        this.blockManager.setPlayerFilter("");
       }
     },
     formatTime(ms) {
@@ -422,29 +438,64 @@ export default {
       }
     }
 
-    .recent-player-bar {
-      font-size: 0.75rem;
-      color: #aaa;
+    .player-filter-bar {
+      font-size: 0.78rem;
+      color: #ccc;
       display: flex;
       gap: 6px;
       align-items: center;
-      background: rgba(255, 255, 255, 0.04);
-      padding: 3px 8px;
+      background: rgba(255, 255, 255, 0.05);
+      padding: 4px 10px;
       border-radius: 6px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      border: 1px solid rgba(255, 255, 255, 0.08);
 
-      .player-tag {
-        color: #888;
+      .filter-icon {
+        font-size: 0.85rem;
       }
-      .player-name {
+
+      .filter-label {
+        color: #aaa;
+        font-weight: 500;
+        white-space: nowrap;
+      }
+
+      .player-select {
+        flex: 1;
+        background: rgba(0, 0, 0, 0.45);
         color: #ffd54f;
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 4px;
+        padding: 3px 8px;
+        font-size: 0.78rem;
         font-weight: 600;
+        outline: none;
+        cursor: pointer;
+
+        option {
+          background: #1e1e24;
+          color: #fff;
+          font-weight: normal;
+        }
+
+        &:focus {
+          border-color: #00e5ff;
+        }
       }
-      .block-name {
-        color: #00e5ff;
-        font-family: monospace;
+
+      .clear-filter-btn {
+        background: rgba(255, 255, 255, 0.1);
+        border: none;
+        color: #ff5252;
+        border-radius: 4px;
+        padding: 2px 7px;
+        font-size: 0.75rem;
+        cursor: pointer;
+        font-weight: bold;
+        transition: background 0.15s ease;
+
+        &:hover {
+          background: rgba(255, 82, 82, 0.25);
+        }
       }
     }
 

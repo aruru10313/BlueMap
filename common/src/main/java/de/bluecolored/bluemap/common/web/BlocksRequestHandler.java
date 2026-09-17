@@ -57,6 +57,9 @@ public class BlocksRequestHandler implements HttpRequestHandler {
             serverWorld = server.getServerWorld(world).orElse(null);
         }
         Key dimension = serverWorld != null ? serverWorld.getDimension() : null;
+        if (dimension == null && world instanceof de.bluecolored.bluemap.core.world.mca.MCAWorld mcaWorld) {
+            dimension = mcaWorld.getDimension();
+        }
 
         long since = 0;
         String sinceStr = request.getGETParams().get("since");

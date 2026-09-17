@@ -104,7 +104,18 @@ public class WebFilesManager {
     }
 
     public boolean filesNeedUpdate() {
-        return !Files.exists(webRoot.resolve("index.html"));
+        if (!Files.exists(webRoot.resolve("index.html"))) return true;
+        Path settingsFile = getSettingsFile();
+        if (!Files.exists(settingsFile)) return true;
+        try (BufferedReader reader = Files.newBufferedReader(settingsFile)) {
+            Settings diskSettings = GSON.fromJson(reader, Settings.class);
+            if (diskSettings == null || !BlueMap.VERSION.equals(diskSettings.version)) {
+                return true;
+            }
+        } catch (Exception ignored) {
+            return true;
+        }
+        return false;
     }
 
     public void updateFiles() throws IOException {

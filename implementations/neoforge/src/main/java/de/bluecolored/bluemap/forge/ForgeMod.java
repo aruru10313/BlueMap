@@ -178,6 +178,9 @@ public class ForgeMod implements Server {
         if (world instanceof ServerLevel serverLevel)
             return Optional.of(getServerWorld(serverLevel));
 
+        if (world instanceof de.bluecolored.bluemap.core.world.World coreWorld)
+            return Server.super.getServerWorld(coreWorld);
+
         return Optional.empty();
     }
 

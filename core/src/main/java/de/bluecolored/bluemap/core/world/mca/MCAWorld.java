@@ -100,6 +100,10 @@ public class MCAWorld implements World {
         return levelData.getData().getLevelName();
     }
 
+    public Key getDimension() {
+        return dimension;
+    }
+
     @Override
     public Grid getChunkGrid() {
         return blockChunkGrid.getChunkGrid();

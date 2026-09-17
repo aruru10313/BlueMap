@@ -27,6 +27,7 @@ import {
     Color,
     DynamicDrawUsage,
     Group,
+    InstancedBufferAttribute,
     InstancedMesh,
     LineBasicMaterial,
     LineSegments,
@@ -193,6 +194,8 @@ export class BlockManager {
             renderedBlocks: 0,
             recentPlacedCount: 0,
             autoFollow: false,
+            selectedPlayer: "",
+            playersList: [],
             latestPlayer: null,
             latestBlock: null,
             isSyncing: false,
@@ -201,6 +204,8 @@ export class BlockManager {
 
         // Event records storage
         this.eventsList = [];
+        this.seenSeqs = new Set();
+        this.knownPlayers = new Set();
         this.latestSeq = 0;
 
         // Visual containers
@@ -212,10 +217,21 @@ export class BlockManager {
         this.maxInstances = 50000;
         const boxGeometry = new BoxGeometry(1.002, 1.002, 1.002);
         const boxMaterial = new MeshBasicMaterial({
-            color: 0xffffff
+            color: 0xffffff,
+            polygonOffset: true,
+            polygonOffsetFactor: -1,
+            polygonOffsetUnits: -1
         });
         this.instancedMesh = new InstancedMesh(boxGeometry, boxMaterial, this.maxInstances);
         this.instancedMesh.instanceMatrix.setUsage(DynamicDrawUsage);
+        this.instancedMesh.frustumCulled = false; // Prevent culling when camera moves away from origin
+
+        // Pre-allocate instanceColor attribute so shader compiles with USE_INSTANCING_COLOR immediately
+        const colorArray = new Float32Array(this.maxInstances * 3);
+        colorArray.fill(1.0);
+        this.instancedMesh.instanceColor = new InstancedBufferAttribute(colorArray, 3);
+        this.instancedMesh.instanceColor.setUsage(DynamicDrawUsage);
+
         this.instancedMesh.count = 0;
         this.sceneGroup.add(this.instancedMesh);
 
@@ -246,6 +262,17 @@ export class BlockManager {
             this.events.addEventListener("bluemapRenderFrame", this._stepHandler);
         }
 
+        let lastTime = performance.now();
+        this._rafId = null;
+        const tick = (now) => {
+            if (this.disposed) return;
+            const delta = Math.min(100, Math.max(1, now - lastTime));
+            lastTime = now;
+            this.onFrame(delta);
+            this._rafId = requestAnimationFrame(tick);
+        };
+        this._rafId = requestAnimationFrame(tick);
+
         // Start initial load & poll
         this.fetchFullHistory().then(() => {
             this.startPolling(1000);
@@ -269,7 +296,7 @@ export class BlockManager {
 
     async fetchFullHistory() {
         try {
-            let res = await fetch(`${this.fileUrl}?since=0`, { cache: "no-cache" });
+            let res = await fetch(`${this.fileUrl}?since=0&_t=${Date.now()}`, { cache: "no-store" });
             if (!res.ok) return;
             let data = await res.json();
             this.handlePayload(data, true);
@@ -280,8 +307,8 @@ export class BlockManager {
 
     async pollNewEvents() {
         try {
-            let url = `${this.fileUrl}?since=${this.latestSeq}`;
-            let res = await fetch(url, { cache: "no-cache" });
+            let url = `${this.fileUrl}?since=${this.latestSeq}&_t=${Date.now()}`;
+            let res = await fetch(url, { cache: "no-store" });
             if (!res.ok) return;
             let data = await res.json();
             this.handlePayload(data, false);
@@ -299,32 +326,52 @@ export class BlockManager {
         if (payload.currentTime) {
             this.data.serverEndTime = Math.max(this.data.serverEndTime, payload.currentTime);
         }
-        if (payload.latestSeq) {
-            this.latestSeq = Math.max(this.latestSeq, payload.latestSeq);
-        }
 
         let newEvents = payload.events;
-        if (newEvents.length === 0 && !isInitial) return;
+        if (!this.seenSeqs) this.seenSeqs = new Set();
 
         if (isInitial) {
             this.eventsList = newEvents;
-        } else {
+            this.seenSeqs.clear();
             for (let evt of newEvents) {
-                if (evt.seq > this.latestSeq - newEvents.length) {
+                this.seenSeqs.add(evt.seq);
+            }
+        } else if (newEvents.length > 0) {
+            for (let evt of newEvents) {
+                if (!this.seenSeqs.has(evt.seq)) {
+                    this.seenSeqs.add(evt.seq);
                     this.eventsList.push(evt);
                 }
             }
         }
 
+        if (this.eventsList.length > 0) {
+            this.latestSeq = this.eventsList[this.eventsList.length - 1].seq;
+        }
+        if (payload.latestSeq) {
+            this.latestSeq = Math.max(this.latestSeq, payload.latestSeq);
+        }
+
+        // Update unique players list
+        if (!this.knownPlayers) this.knownPlayers = new Set();
+        if (isInitial) this.knownPlayers.clear();
+        for (let evt of (isInitial ? this.eventsList : newEvents)) {
+            if (evt.p) this.knownPlayers.add(evt.p);
+        }
+        this.data.playersList = Array.from(this.knownPlayers).sort();
+
         // Keep bounded list on client
         if (this.eventsList.length > this.maxInstances) {
-            this.eventsList.splice(0, this.eventsList.length - this.maxInstances);
+            let removed = this.eventsList.splice(0, this.eventsList.length - this.maxInstances);
+            for (let r of removed) {
+                this.seenSeqs.delete(r.seq);
+            }
         }
 
         this.data.totalEvents = this.eventsList.length;
 
-        // If not scrubbing back in timelapse, keep cursor at latest
-        if (!this.data.isPlaying && this.data.progress >= 0.99) {
+        // If initial load or in real-time mode, keep cursor at latest and rebuild
+        if (isInitial || (!this.data.isPlaying && this.data.progress >= 0.99)) {
             this.data.currentTime = this.data.serverEndTime;
             this.rebuildActiveBlocks(this.data.currentTime);
         }
@@ -355,9 +402,11 @@ export class BlockManager {
     rebuildActiveBlocks(upToTime) {
         this.activeBlocks.clear();
         let targetTime = upToTime !== undefined ? upToTime : this.data.currentTime;
+        let playerFilter = this.data.selectedPlayer;
 
         for (let evt of this.eventsList) {
-            if (evt.t > targetTime) break;
+            if (evt.t > targetTime) continue; // Do not abort early, safely continue
+            if (playerFilter && evt.p !== playerFilter) continue;
             let key = `${evt.x},${evt.y},${evt.z}`;
             if (evt.a === "place") {
                 this.activeBlocks.set(key, {
@@ -415,6 +464,7 @@ export class BlockManager {
 
         const lines = new LineSegments(this.wireGeometry, this.wireMaterial.clone());
         lines.position.set(x + 0.5, y + 0.5, z + 0.5);
+        lines.frustumCulled = false;
         this.pulseGroup.add(lines);
 
         this.pulses.push({
@@ -466,6 +516,19 @@ export class BlockManager {
             if (this.mapViewer) {
                 this.mapViewer.redraw();
             }
+        } else if (this.data.progress >= 0.99) {
+            // Smoothly advance time in real-time live mode
+            if (this.data.currentTime < this.data.serverEndTime) {
+                this.data.currentTime = Math.min(this.data.serverEndTime, this.data.currentTime + deltaMs);
+            }
+        }
+    }
+
+    setPlayerFilter(player) {
+        this.data.selectedPlayer = player ? player.trim() : "";
+        this.rebuildActiveBlocks(this.data.currentTime);
+        if (this.mapViewer) {
+            this.mapViewer.redraw();
         }
     }
 
@@ -564,6 +627,11 @@ export class BlockManager {
     dispose() {
         this.disposed = true;
         this.stopPolling();
+
+        if (this._rafId) {
+            cancelAnimationFrame(this._rafId);
+            this._rafId = null;
+        }
 
         if (this.events && this._stepHandler) {
             this.events.removeEventListener("bluemapRenderFrame", this._stepHandler);
