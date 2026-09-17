@@ -32,6 +32,7 @@ import de.bluecolored.bluemap.common.addons.AddonLoader;
 import de.bluecolored.bluemap.common.api.BlueMapAPIImpl;
 import de.bluecolored.bluemap.common.config.*;
 import de.bluecolored.bluemap.common.debug.StateDumper;
+import de.bluecolored.bluemap.common.live.BlockTracker;
 import de.bluecolored.bluemap.common.live.LivePlayersDataSupplier;
 import de.bluecolored.bluemap.common.metrics.Metrics;
 import de.bluecolored.bluemap.common.plugin.skins.PlayerSkinUpdater;
@@ -103,6 +104,7 @@ public class Plugin implements ServerEventListener {
     private Map<String, MapUpdateService> mapUpdateServices;
     private PlayerSkinUpdater skinUpdater;
 
+    private final BlockTracker blockTracker = new BlockTracker();
     private boolean loaded = false;
 
     public Plugin(String implementationType, Server serverInterface) {
@@ -207,7 +209,7 @@ public class Plugin implements ServerEventListener {
                         MapRequestHandler mapRequestHandler;
                         BmMap map = maps.get(id);
                         if (map != null) {
-                            mapRequestHandler = new MapRequestHandler(map, serverInterface, pluginConfig, Predicate.not(pluginState::isPlayerHidden));
+                            mapRequestHandler = new MapRequestHandler(map, serverInterface, pluginConfig, Predicate.not(pluginState::isPlayerHidden), blockTracker);
                         } else {
                             Storage storage = blueMap.getOrLoadStorage(mapConfig.getStorage());
                             mapRequestHandler = new MapRequestHandler(storage.map(id));
@@ -602,6 +604,11 @@ public class Plugin implements ServerEventListener {
     @Override
     public void onPlayerLeave(UUID playerUuid) {
         checkPausedByPlayerCountSoon();
+    }
+
+    @Override
+    public void onBlockChange(ServerWorld world, int x, int y, int z, String blockId, @Nullable String player, boolean isPlacement) {
+        this.blockTracker.addBlock(world, x, y, z, blockId, player, isPlacement);
     }
 
     private void checkPausedByPlayerCountSoon() {

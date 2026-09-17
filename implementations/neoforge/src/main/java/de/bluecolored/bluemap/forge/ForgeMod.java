@@ -82,7 +82,7 @@ public class ForgeMod implements Server {
 
         this.pluginInstance = new Plugin("neoforge", this);
 
-        this.eventForwarder = new ForgeEventForwarder();
+        this.eventForwarder = new ForgeEventForwarder(this);
         this.worlds = Caches.with()
                 .weakKeys()
                 .maximumSize(1000)

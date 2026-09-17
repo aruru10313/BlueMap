@@ -8,6 +8,8 @@ logs/
 run/
 runs/
 node_modules/
+.kotlin/
+*.log
 
 .classpath
 .project

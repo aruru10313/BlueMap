@@ -36,6 +36,7 @@ import {getLocalStorage, round, setLocalStorage} from "./Utils";
 import {i18n, setLanguage} from "../i18n";
 import {PlayerMarkerManager} from "./markers/PlayerMarkerManager";
 import {NormalMarkerManager} from "./markers/NormalMarkerManager";
+import {BlockManager} from "./live/BlockManager";
 import {reactive} from "vue";
 
 export class BlueMapApp {
@@ -55,6 +56,8 @@ export class BlueMapApp {
         this.playerMarkerManager = null;
         /** @type {NormalMarkerManager} */
         this.markerFileManager = null;
+        /** @type {BlockManager} */
+        this.blockManager = null;
 
         /** @type {{
          *      version: string,
@@ -253,6 +256,7 @@ export class BlueMapApp {
 
         if (this.playerMarkerManager) this.playerMarkerManager.dispose();
         if (this.markerFileManager) this.markerFileManager.dispose();
+        if (this.blockManager) this.blockManager.dispose();
 
         await this.mapViewer.switchMap(map)
 
@@ -263,7 +267,8 @@ export class BlueMapApp {
 
         await Promise.all([
             this.initPlayerMarkerManager(),
-            this.initMarkerFileManager()
+            this.initMarkerFileManager(),
+            this.initBlockManager()
         ]);
     }
 
@@ -435,6 +440,21 @@ export class BlueMapApp {
                 alert(this.events, e, "warning");
                 this.markerFileManager.dispose();
             });
+    }
+
+    initBlockManager() {
+        if (this.blockManager)
+            this.blockManager.dispose();
+
+        const map = this.mapViewer.map;
+        if (!map) return;
+
+        this.blockManager = new BlockManager(
+            this.mapViewer.markers,
+            map.data.liveDataRoot + "/live/blocks.json",
+            this.events,
+            this.mapViewer
+        );
     }
 
     updateControlsSettings() {

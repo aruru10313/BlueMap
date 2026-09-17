@@ -32,4 +32,6 @@ public interface ServerEventListener {
 
     default void onPlayerLeave(UUID playerUuid) {};
 
+    default void onBlockChange(ServerWorld world, int x, int y, int z, String blockId, String player, boolean isPlacement) {};
+
 }

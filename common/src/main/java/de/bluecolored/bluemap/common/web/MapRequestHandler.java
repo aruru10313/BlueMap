@@ -38,21 +38,36 @@ import java.util.UUID;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 
+import de.bluecolored.bluemap.common.live.BlockTracker;
+import de.bluecolored.bluemap.common.web.http.HttpRequestHandler;
+
 public class MapRequestHandler extends RoutingRequestHandler {
 
     public MapRequestHandler(BmMap map, Server serverInterface, PluginConfig pluginConfig, Predicate<UUID> playerFilter) {
+        this(map, serverInterface, pluginConfig, playerFilter, null);
+    }
+
+    public MapRequestHandler(BmMap map, Server serverInterface, PluginConfig pluginConfig, Predicate<UUID> playerFilter, @Nullable BlockTracker blockTracker) {
         this(map.getStorage(),
                 new LivePlayersDataSupplier(serverInterface, pluginConfig, map.getWorld(), playerFilter),
-                new LiveMarkersDataSupplier(map.getMarkerSets()));
+                new LiveMarkersDataSupplier(map.getMarkerSets()),
+                blockTracker != null ? new BlocksRequestHandler(blockTracker, map.getWorld()) : null);
     }
 
     public MapRequestHandler(MapStorage mapStorage) {
-        this(mapStorage, null, null);
+        this(mapStorage, null, null, null);
     }
 
     public MapRequestHandler(MapStorage mapStorage,
                              @Nullable Supplier<String> livePlayersDataSupplier,
                              @Nullable Supplier<String> liveMarkerDataSupplier) {
+        this(mapStorage, livePlayersDataSupplier, liveMarkerDataSupplier, null);
+    }
+
+    public MapRequestHandler(MapStorage mapStorage,
+                             @Nullable Supplier<String> livePlayersDataSupplier,
+                             @Nullable Supplier<String> liveMarkerDataSupplier,
+                             @Nullable HttpRequestHandler liveBlocksRequestHandler) {
 
         register(".*", new MapStorageRequestHandler(mapStorage));
 
@@ -66,6 +81,10 @@ public class MapRequestHandler extends RoutingRequestHandler {
             register("live/markers\\.json", "", new JsonDataRequestHandler(
                     new CachedRateLimitDataSupplier(liveMarkerDataSupplier,10000)
             ));
+        }
+
+        if (liveBlocksRequestHandler != null) {
+            register("live/blocks\\.json", "", liveBlocksRequestHandler);
         }
     }
 

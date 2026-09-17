@@ -3,6 +3,7 @@
     <FreeFlightMobileControls v-if="mapViewer.mapState === 'loaded' && appState.controls.state === 'free'" />
     <ZoomButtons v-if="showMapMenu && appState.controls.showZoomButtons && appState.controls.state !== 'free'" />
     <ControlBar />
+    <TimelapseBar v-if="showMapMenu" />
     <div v-if="mapViewer.mapState !== 'loaded'" class="map-state-message">{{ $t("map." + mapViewer.mapState) }}</div>
     <MainMenu :menu="appState.menu" />
   </div>
@@ -13,6 +14,7 @@ import ControlBar from "./components/ControlBar/ControlBar.vue";
 import MainMenu from "./components/Menu/MainMenu.vue";
 import FreeFlightMobileControls from "./components/Controls/FreeFlightMobileControls.vue";
 import ZoomButtons from "./components/Controls/ZoomButtons.vue";
+import TimelapseBar from "./components/Timelapse/TimelapseBar.vue";
 
 export default {
   name: 'App',
@@ -20,7 +22,8 @@ export default {
     FreeFlightMobileControls,
     MainMenu,
     ControlBar,
-    ZoomButtons
+    ZoomButtons,
+    TimelapseBar
   },
   computed: {
     showMapMenu() {
